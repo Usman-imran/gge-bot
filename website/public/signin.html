@@ -1,33 +1,39 @@
-<html>
+<!doctype html>
+<html lang="en">
 
 <head>
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Log in</title>
+    <script src="js/auth.js"></script>
     <script src="js/index.js"></script>
     <link rel="stylesheet" href="css/index.css">
 </head>
-<div class="front-panel-anchor ">
-    <div class="front-panel">
-        <div class="banner">
-            <a href="signup.html" style="text-align: left; margin:10px">Sign Up</a>
-        </div>
-        <img src="logo192.png" class="ashes-logo" alt="">
-        <form id="login-form">
-            <div class="input-field-container">
-                <div class="login-info-banner" id="login-info-banner"></div>
-                <li><input type="text" class="input-field" id="email_name" placeholder="Username"></li>
-                <li><input type="password" class="input-field" id="password" placeholder="Password"></li>
-                <li>
-                    <div class="remember-password"><input type="checkbox" id="remember-password"><span>Remember
-                            Password</span></div>
-                </li>
-                <li><button type="submit" class="signin-signout">Login</button></li>
-            </div>
-        </form>
-        <div class="footer">
-            <div><a href="signup.html" style="text-align: right; margin:10px">Forgot Password</a></div>
-            <div><a href="privacypolicy.html">Privacy policy</a></div>
+
+<body>
+    <div class="front-panel-anchor">
+        <div class="front-panel">
+            <img src="logo192.png" class="ashes-logo" alt="">
+            <h2 class="auth-title">Log in</h2>
+            <form id="login-form" novalidate>
+                <ul class="input-field-container">
+                    <li><input type="text" class="input-field" id="username" placeholder="Username"
+                            autocomplete="username" autofocus></li>
+                    <li><input type="password" class="input-field" id="password" placeholder="Password"
+                            autocomplete="current-password"></li>
+                    <li>
+                        <label class="remember-password"><input type="checkbox" id="remember-me" checked>
+                            Remember me</label>
+                    </li>
+                    <li><button type="submit" class="signin-signout">Log in</button></li>
+                    <li>
+                        <div class="login-info-banner" role="alert"></div>
+                    </li>
+                </ul>
+            </form>
+            <p class="auth-switch">No account yet? <a href="signup.html">Sign up</a></p>
         </div>
     </div>
-</div>
+</body>
 
 </html>

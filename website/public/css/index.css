@@ -193,3 +193,40 @@ body {
     /* padding-top: 10px; */
     /* padding-bottom: 0px; */
 }
+/* Log in / sign up pages */
+html, body {
+    height: 100%;
+}
+.front-panel {
+    padding: 24px 0;
+    height: auto;
+    min-height: 0;
+}
+.input-field-container {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+.input-field {
+    width: 200px;
+}
+.auth-title {
+    margin: 12px 0 8px;
+    font-weight: normal;
+}
+.remember-password {
+    display: inline-block;
+    margin: 6px 0;
+    cursor: pointer;
+}
+.signin-signout:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.login-info-banner:empty {
+    padding: 0;
+}
+.auth-switch > a {
+    color: #7882f5;
+    text-decoration: none;
+}

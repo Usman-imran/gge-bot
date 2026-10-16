@@ -1,29 +1,37 @@
-<html>
+<!doctype html>
+<html lang="en">
 
 <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign up</title>
+    <script src="js/auth.js"></script>
     <script src="js/signup.js"></script>
     <link rel="stylesheet" href="css/index.css">
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
 </head>
-<div class="front-panel-anchor ">
-<div class="front-panel">
-    <div class="banner">
-        <a href="signin.html" style="text-align: left; margin:10px">Login</a>
-    </div>
-    <img src="logo192.png" class="ashes-logo" alt="">
-    <form id="signup-form">
-        <div class="input-field-container">
-            <div class="login-info-banner" id="login-info-banner"></div>
-            <li><input type="text" class="input-field" id="username" placeholder="Username"></li>
-            <li><input type="password" class="input-field" id="password" placeholder="Password"></li>
-            <li><input type="password" class="input-field" id="token" placeholder="Token"></li>
-            <li><button type="submit" class="signin-signout">Signup</button></li>
+
+<body>
+    <div class="front-panel-anchor">
+        <div class="front-panel">
+            <img src="logo192.png" class="ashes-logo" alt="">
+            <h2 class="auth-title">Create account</h2>
+            <form id="signup-form" novalidate>
+                <ul class="input-field-container">
+                    <li><input type="text" class="input-field" id="username" placeholder="Username"
+                            autocomplete="username" autofocus></li>
+                    <li><input type="password" class="input-field" id="password"
+                            placeholder="Password (min. 6 characters)" autocomplete="new-password"></li>
+                    <li><input type="password" class="input-field" id="confirm-password" placeholder="Repeat password"
+                            autocomplete="new-password"></li>
+                    <li><button type="submit" class="signin-signout">Sign up</button></li>
+                    <li>
+                        <div class="login-info-banner" role="alert"></div>
+                    </li>
+                </ul>
+            </form>
+            <p class="auth-switch">Already have an account? <a href="signin.html">Log in</a></p>
         </div>
-    </form>
-    <!-- <div class="footer">
-        <a href="privacypolicy.html">Privacy policy</a>
-    </div> -->
     </div>
-</div>
+</body>
 
 </html>

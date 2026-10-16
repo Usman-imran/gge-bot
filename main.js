@@ -307,37 +307,68 @@ async function start() {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.sendFile('1.xml', { root: "." }) 
   })
+  //Async on purpose: 600000 rounds take about a second and the sync version
+  //blocked every running bot while someone logged in.
+  const hashPassword = (password, salt) => new Promise((resolve, reject) =>
+    crypto.pbkdf2(password, salt, 600000, 64, 'sha256', (e, hash) => e ? reject(e) : resolve(hash)))
+
+  const USERNAME_MIN = 3, USERNAME_MAX = 32, PASSWORD_MIN = 6
+
   app.post('/api', bodyParser.json(), async (req, res) => {
-    let json = req.body
+    const json = req.body ?? {}
+    const reply = (id, obj) => res.json({ id, ...obj })
+    const fail = (id, error) => reply(id, { r: 1, error })
 
-    res.setHeader('Content-Type', 'application/json')
-    if (json.id == 0) {
-      const row = userDatabase.prepare('Select * FROM Users WHERE username = ?')
-        .get(json.email_name)
-      if (!row)
-        return res.send(JSON.stringify({ id: 0, r: 1, error: 'Invalid login details.' }))
-      
-      if (crypto.pbkdf2Sync(json.password, row.passwordSalt, 600000, 64, 'sha256').compare(row.passwordHash) == 0)
-        res.send(JSON.stringify({ id: 0, r: 0, uuid: row.uuid }))
-      else
-        res.send(JSON.stringify({ id: 0, r: 1, error: 'Invalid login details.'})) //TODO: sort this out server side
+    //email_name: field name of the old login page, still in browser caches
+    const rawUsername = json.username ?? json.email_name
+    const username = typeof rawUsername == "string" ? rawUsername.trim() : ""
+    const password = typeof json.password == "string" ? json.password : ""
+
+    try {
+      if (json.id == 0) { //Login
+        if (!username || !password)
+          return fail(0, 'Enter your username and password.')
+
+        //Case-insensitive, but an exact match wins for old accounts that
+        //only differ in case.
+        const row = userDatabase.prepare(
+          'SELECT * FROM Users WHERE username = ? COLLATE NOCASE ORDER BY username = ? DESC LIMIT 1')
+          .get(username, username)
+        if (!row)
+          return fail(0, 'Wrong username or password.')
+
+        const hash = await hashPassword(password, row.passwordSalt)
+        if (!crypto.timingSafeEqual(hash, Buffer.from(row.passwordHash)))
+          return fail(0, 'Wrong username or password.')
+
+        return reply(0, { r: 0, uuid: row.uuid })
+      }
+
+      if (json.id == 1) { //Sign up
+        if (username.length < USERNAME_MIN || username.length > USERNAME_MAX)
+          return fail(1, `Username must be ${USERNAME_MIN} to ${USERNAME_MAX} characters.`)
+        if (password.length < PASSWORD_MIN)
+          return fail(1, `Password must be at least ${PASSWORD_MIN} characters.`)
+
+        if (userDatabase.prepare('SELECT 1 FROM Users WHERE username = ? COLLATE NOCASE').get(username))
+          return fail(1, 'That username is already taken.')
+
+        const salt = crypto.randomBytes(256)
+        const passwordHash = await hashPassword(password, salt)
+        const uuid = crypto.randomUUID()
+        userDatabase.prepare('INSERT INTO Users (username, passwordHash, passwordSalt, uuid) VALUES(?,?,?,?)')
+          .run(username, passwordHash, salt, uuid)
+
+        return reply(1, { r: 0, uuid })
+      }
+
+      res.status(400)
+      return fail(json.id, 'Unknown request.')
     }
-    else if (json.id == 1) {
-      if (json.token != (ggeConfig.signupToken ?? ""))
-        return res.send(JSON.stringify({ id: 0, r: 1, error: 'Invalid Sign up details.' }))
-
-      const salt = crypto.randomBytes(256)
-      const passwordHash = crypto.pbkdf2Sync(json.password, salt, 600000, 64, 'sha256')
-      const uuid = crypto.randomUUID()
-      try {
-      userDatabase.prepare('INSERT INTO Users (username, passwordHash, passwordSalt, uuid) VALUES(?,?,?,?)')
-         .run(json.username, passwordHash, salt, uuid)
-          res.send(JSON.stringify({ r: 0, uuid: uuid }))
-      }
-      catch(e) {
-          res.send(JSON.stringify({ r: 1 }))
-          console.error(e)
-      }
+    catch (e) {
+      console.error(e)
+      res.status(500)
+      return fail(json.id, 'Server error, please try again.')
     }
   })
 
