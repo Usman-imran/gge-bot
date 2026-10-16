@@ -75,6 +75,20 @@ function sendXT(cmdName, paramObj) {
 let lordErrors = 0
 let tooManyUnits = 0
 
+// "<key>TIMED_OUT" is also printed for every successful response of these keys,
+// which floods the log; hide exactly those lines. The promises still resolve
+// and reject normally, and real error codes are still logged.
+const quietTimeoutKeys = new Set(["gaa", "dcl", "cra"])
+// Keys whose callers log every outcome themselves, never log these here.
+const quietResultKeys = new Set()
+const warnWaitForResult = (key, msg) => {
+    if (msg == "TIMED_OUT" && quietTimeoutKeys.has(key))
+        return
+    if (quietResultKeys.has(key))
+        return
+    console.warn(key, msg)
+}
+
 /**
  * 
  * @param {string} key 
@@ -125,7 +139,7 @@ const waitForResult = (key, timeout, func) => new Promise((resolve, reject) => {
             result = -1
             // console.debug(key, "timedOut")
 
-            console.warn(key, msg)
+            warnWaitForResult(key, msg)
 
             reject(msg)
         }, timeout * (ggeConfig.timeoutMultiplier ?? 1))
@@ -136,7 +150,7 @@ const waitForResult = (key, timeout, func) => new Promise((resolve, reject) => {
             result = _result
 
         const msg = (_result == undefined || _result == 0) ? "TIMED_OUT" : !err[_result] ? _result : err[_result]
-        console.warn(key, msg)
+        warnWaitForResult(key, msg)
         
         checkForLordIssues()
         if (!func(Object(data), Number(_result)))
@@ -177,7 +191,9 @@ module.exports = {
     webSocket,
     events,
     botConfig,
-    playerInfo
+    playerInfo,
+    quietTimeoutKeys,
+    quietResultKeys
 }
 
 let status = {}

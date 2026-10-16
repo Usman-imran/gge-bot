@@ -170,6 +170,7 @@
 	"attackMiddle": "Attack middle",
 	"attackRight": "Attack right flank",
 	"attackCourtyard": "Attack courtyard",
+	"attackFromOutpost": "Also attack from outposts",
 	"maxWaves": "Max waves",
 	"attackDelaySeconds": "Attack Delay Seconds",
 	"attackDelayRandomizationSeconds": "Attack Time Randomization",
@@ -223,5 +224,8 @@
 	"incomingFrom": " from ",
 	"incomingIsAttacking": " is attacking ",
 	"incomingIn": " incoming in ",
-	"incomingClicks" : " clicks"
+	"incomingClicks" : " clicks",
+	"recruit": "Auto Recruit",
+	"recruitTroopType": "Troop type",
+	"recruitPackageSize": "Troops per slot"
 }

@@ -39,6 +39,11 @@ if (require('node:worker_threads').isMainThread)
                 default: false
             },
             {
+                type: "Checkbox",
+                key: "attackFromOutpost",
+                default: false
+            },
+            {
                 type: "Text",
                 key: "commanderWhiteList"
             },

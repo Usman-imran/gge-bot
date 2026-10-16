@@ -6,8 +6,8 @@ if (require('node:worker_threads').isMainThread) {
             { type: "Checkbox", key: "allowLvl60Easy", default: true },
             { type: "Checkbox", key: "allowLvl70Easy", default: true },
             { type: "Checkbox", key: "allowLvl80Easy", default: true },
-            { type: "", md: 3},
-            
+            { type: "", md: 3 },
+
             { type: "Label", key: "hardForts", md: 2 },
             { type: "Checkbox", key: "allowLvl40Hard", default: false },
             { type: "Checkbox", key: "allowLvl50Hard", default: false },
@@ -16,7 +16,7 @@ if (require('node:worker_threads').isMainThread) {
             { type: "Checkbox", key: "allowLvl80Hard", default: false },
 
             { type: "Label", key: "other" },
-            { type: "Checkbox", key: "buyCoins", default: true },
+            { type: "Checkbox", key: "buyCoins", default: false },
             { type: "Checkbox", key: "buyDecoration", default: false },
             { type: "Checkbox", key: "buyXP", default: false },
             {
@@ -24,8 +24,12 @@ if (require('node:worker_threads').isMainThread) {
                 key: "useFeather",
                 default: false
             },
-            { type: "Checkbox", key: "useCoin", default: false }
+            { type: "Checkbox", key: "useCoin", default: false },
+            { type: "Label", key: "ship Upgrades", md: 2 },
+            { type: "Checkbox", key: "auto Upgrade Ships", default: false },
+            { type: "Checkbox", key: "useTimeSkipsForShips", default: false },
         ]
+
     }
     try {
         fs.accessSync("./plugins-extra/upgradeStormCargo.js")
@@ -34,7 +38,7 @@ if (require('node:worker_threads').isMainThread) {
             key: "upgradeStormForts"
         })
     }
-    catch(e) {
+    catch (e) {
         console.debug(e)
     }
     module.exports.pluginOptions.push({
@@ -90,15 +94,14 @@ function spiralCoordinates(n) {
     return { x, y }
 }
 
-const pluginOptions = 
+const pluginOptions =
     botConfig.plugins[require('path').basename(__filename).slice(0, -3)] ?? {}
 
-if(pluginOptions.upgradeStormForts)
-{
+if (pluginOptions.upgradeStormForts) {
     try {
         require("../../plugins-extra/upgradeStormCargo.js")
     }
-    catch(e) {
+    catch (e) {
         console.warn(e)
     }
 }
@@ -108,7 +111,7 @@ const type = AreaType.stormTower
 
 events.once("load", async () => {
     let allowedLevels = [];
-    
+
     if (pluginOptions["allowLvl40Hard"]) allowedLevels.push(10)
     if (pluginOptions["allowLvl50Hard"]) allowedLevels.push(11)
     if (pluginOptions["allowLvl60Hard"]) allowedLevels.push(12)
@@ -123,12 +126,12 @@ events.once("load", async () => {
 
     const sourceCastleArea = (await getResourceCastleList()).castles.find(e => e.kingdomID == kingdomID)
         .areaInfo.find(e => e.type == AreaType.externalKingdom);
-        
+
     xtHandler.on("dcl", obj => {
         const castleProd = Types.DetailedCastleList(obj)
             .castles.find(a => a.kingdomID == kingdomID)
             .areaInfo.find(a => a.areaID == sourceCastleArea.extraData[0])
-        
+
         if (pluginOptions["buyCoins"]) {
             if (castleProd.aqua > 500000) {
                 castleProd.aqua -= 500000
@@ -156,22 +159,22 @@ events.once("load", async () => {
 
     if (pluginOptions["addworserforts"])
         allowedLevels.push(11, 10)
-    
+
     let sortedAreaInfo = []
     const movements = []
 
     xtHandler.on("gam", obj => {
         const movementsGAA = Types.GetAllMovements(obj)
         movementsGAA?.movements.forEach(movement => {
-            if(kingdomID != movement.movementData.kingdomID)
+            if (kingdomID != movement.movementData.kingdomID)
                 return
-            
+
             const targetAttack = movement.movementData.targetAttack
 
-            if(type != targetAttack.type)
+            if (type != targetAttack.type)
                 return
 
-            if(movements.find(e => e.x == targetAttack.x && e.y == targetAttack.y))
+            if (movements.find(e => e.x == targetAttack.x && e.y == targetAttack.y))
                 return
 
             movements.push(targetAttack)
@@ -180,12 +183,12 @@ events.once("load", async () => {
     xtHandler.on("cat", obj => {
         const movementInfo = Types.ReturningAttack(obj)
         const sourceAttack = movementInfo.movement.movementData.sourceAttack
-        if(kingdomID != movementInfo.movement.movementData.kingdomID ||
-           type != sourceAttack.type)
-           return
+        if (kingdomID != movementInfo.movement.movementData.kingdomID ||
+            type != sourceAttack.type)
+            return
 
         let index = movements.findIndex(e => e.x == sourceAttack.x && e.y == sourceAttack.y)
-        if(index == -1)
+        if (index == -1)
             return
         movements.splice(index, 1)
     })
@@ -197,7 +200,7 @@ events.once("load", async () => {
             comList = Array.from({ length: end - start + 1 }, (_, i) => start + i)
         }
 
-        const commander = await waitForCommanderAvailable(comList, undefined, 
+        const commander = await waitForCommanderAvailable(comList, undefined,
             (a, b) => getCommanderStats(b).relicLootBonus - getCommanderStats(a).relicLootBonus)
 
         try {
@@ -206,8 +209,8 @@ events.once("load", async () => {
                 const timeSinceEpoch = Date.now()
                 for (let i = 0; i < sortedAreaInfo.length; i++) {
                     const areaInfo = sortedAreaInfo[i]
-                    
-                    if(movements.find(e => e.x == areaInfo.x && e.y == areaInfo.y))
+
+                    if (movements.find(e => e.x == areaInfo.x && e.y == areaInfo.y))
                         continue
 
                     let time = (areaInfo.timeSinceRequest + areaInfo.extraData[3] * 1000) - timeSinceEpoch
@@ -216,7 +219,7 @@ events.once("load", async () => {
 
                     await ClientCommands.preSpyInfo(areaInfo.x, areaInfo.y, kingdomID)()
 
-                    if(!allowedLevels.includes(areaInfo.extraData[2]))
+                    if (!allowedLevels.includes(areaInfo.extraData[2]))
                         continue
 
                     if ((areaInfo.timeSinceRequest + areaInfo.extraData[3] * 1000) - Date.now() > 0)
@@ -276,11 +279,11 @@ events.once("load", async () => {
                     throw "NO_MORE_TROOPS"
 
                 attackInfo.A.forEach((wave, i) => {
-                    if(i > 4)
+                    if (i > 4)
                         return
                     const commanderStats = getCommanderStats(commander)
                     const maxTroopFlank = Math.floor(getAmountSoldiersFlank(level) * (1 + (commanderStats.relicAttackUnitAmountFlank ?? 0) / 100)) - 1
-                    
+
                     let maxTroops = maxTroopFlank
 
                     wave.L.U.forEach((unitSlot, i) =>
@@ -302,17 +305,17 @@ events.once("load", async () => {
                         return false
                     return true
                 })
-                if(r == 0)
+                if (r == 0)
                     movements.push(AI)
-                
-                return {...obj, result: r}
+
+                return { ...obj, result: r }
             })
-            
+
             if (!attackInfo) {
                 freeCommander(commander.lordID)
                 return false
             }
-            if(attackInfo.result != 0)
+            if (attackInfo.result != 0)
                 throw err[attackInfo.result]
 
             console.info("hittingTargetAttack", 'C', attackInfo.AAM.UM.L.VIS + 1, ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
@@ -379,25 +382,25 @@ events.once("load", async () => {
             if (attemptsLeft <= 0)
                 continue done
         } while (!gaa)
-        
-        let areaInfo = gaa.areaInfo.filter(ai => ai.type == type).sort((a, b) => 
+
+        let areaInfo = gaa.areaInfo.filter(ai => ai.type == type).sort((a, b) =>
             (Math.pow(sourceCastleArea.x - a.x, 2) + Math.pow(sourceCastleArea.y - a.y, 2)) -
             (Math.pow(sourceCastleArea.x - b.x, 2) + Math.pow(sourceCastleArea.y - b.y, 2)))
 
         sortedAreaInfo.push(...areaInfo)
 
-        if(sortedAreaInfo.every(ai => ![7,8,9].includes(ai.extraData[2]))) //Find and hit a good one before continuing scanning
+        if (sortedAreaInfo.every(ai => ![7, 8, 9].includes(ai.extraData[2]))) //Find and hit a good one before continuing scanning
             continue
 
         sortedAreaInfo.sort((a, b) => {
-            if ((a.extraData[2] % 10) > (b.extraData[2] % 10)) 
+            if ((a.extraData[2] % 10) > (b.extraData[2] % 10))
                 return -1
-            if ((a.extraData[2] % 10) < (b.extraData[2] % 10)) 
+            if ((a.extraData[2] % 10) < (b.extraData[2] % 10))
                 return 1
             //hits left
-            if (a.extraData[4] < b.extraData[4]) 
+            if (a.extraData[4] < b.extraData[4])
                 return -1
-            if (a.extraData[4] > b.extraData[4]) 
+            if (a.extraData[4] > b.extraData[4])
                 return 1
 
             return 0
@@ -412,9 +415,9 @@ events.once("load", async () => {
             const areaInfo = sortedAreaInfo[i]
 
             if (!allowedLevels.includes(areaInfo.extraData[2]))
-                if(((areaInfo.timeSinceRequest + areaInfo.extraData[3] * 1000) - Date.now()) <= 0)
+                if (((areaInfo.timeSinceRequest + areaInfo.extraData[3] * 1000) - Date.now()) <= 0)
                     continue
-            
+
             if (!movements.find(movement => movement.x == areaInfo.x && movement.y == areaInfo.y))
                 minimumTimeTillHit = Math.min(minimumTimeTillHit, (areaInfo.timeSinceRequest + areaInfo.extraData[3] * 1000))
         }
@@ -422,7 +425,7 @@ events.once("load", async () => {
         let time = (Math.max(0, minimumTimeTillHit - Date.now()))
         console.info("waitingForNextPossibleHit", Math.round(time / 1000), "waitingForNextPossibleHit2")
         await new Promise(r => setTimeout(r, time).unref())
-        
+
         while (await sendHit());
     }
 })

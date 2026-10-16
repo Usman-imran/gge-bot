@@ -41,9 +41,15 @@ async function barronHit(type, kingdomID, options) {
         return (0 | Math.floor(1.9 * Math.pow(Math.abs(victorys), .555))) + n
     }
 
-    /** @type {Array<import("../../protocols.js").Types.GAAAreaInfo>} */
+    /**
+     * One entry per castle attacks can be launched from, each holding every
+     * known baron sorted by distance from that castle.
+     * @type {Array<{ sourceArea: import("../../protocols.js").Types.GAAAreaInfo, sortedAreaInfo: Array<import("../../protocols.js").Types.GAAAreaInfo> }>}
+     */
     let sortedAreaInfo = []
     const movements = []
+    const getDistance = (a, b) =>
+        Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2)
 
     xtHandler.on("gam", obj => {
         const movementsGAA = Types.GetAllMovements(obj)
@@ -105,8 +111,12 @@ async function barronHit(type, kingdomID, options) {
 
         movements.splice(index, 1)
     })
-    const sourceCastleArea = (await getResourceCastleList()).castles.find(e => e.kingdomID == kingdomID)
-        .areaInfo.find(e => [AreaType.externalKingdom, AreaType.mainCastle].includes(e.type));
+    // Main castle first, outposts only when the user opted into attacking from them
+    const sourceCastleAreas = (await getResourceCastleList()).castles.find(e => e.kingdomID == kingdomID)
+        .areaInfo.filter(e => [AreaType.externalKingdom, AreaType.mainCastle].includes(e.type) ||
+            (options.attackFromOutpost && e.type == AreaType.outpost))
+        .sort((a, b) => Number(![AreaType.externalKingdom, AreaType.mainCastle].includes(a.type)) -
+            Number(![AreaType.externalKingdom, AreaType.mainCastle].includes(b.type)));
 
     const sendHit = async () => {
         let comList = undefined
@@ -119,68 +129,89 @@ async function barronHit(type, kingdomID, options) {
         const hasShieldMadiens = !(((commander.EQ[3] ?? [])[5]?.every(([id, _]) => id == 121 ? false : true)) ?? true)
         try {
             const attackInfo = await waitToAttack(async () => {
-                const sourceCastle = (await ClientCommands.getDetailedCastleList())
+                const detailedCastles = (await ClientCommands.getDetailedCastleList())
                     .castles.find(a => a.kingdomID == kingdomID)
-                    .areaInfo.find(a => a.areaID == sourceCastleArea.extraData[0])
                 const executionStartTime = Date.now() // Start timer for "human" interaction
 
-                let index = -1
+                const sources = sortedAreaInfo.map(entry => {
+                    const sourceCastle = detailedCastles?.areaInfo
+                        .find(a => a.areaID == entry.sourceArea.extraData[0])
+
+                    const attackerMeleeTroops = []
+                    const attackerRangeTroops = []
+
+                    for (let i = 0; i < (sourceCastle?.unitInventory?.length ?? 0); i++) {
+                        const unit = sourceCastle.unitInventory[i]
+                        const unitInfo = units.find(obj => unit.unitID == obj.wodID)
+                        if (unitInfo == undefined)
+                            continue
+
+                        if (unitInfo.fightType == 0) {
+                            if (troopBlackList.includes(unitInfo.wodID))
+                                continue
+                            if (unitInfo.role == "melee")
+                                attackerMeleeTroops.push([unitInfo, unit.ammount])
+                            else if (unitInfo.role == "ranged")
+                                attackerRangeTroops.push([unitInfo, unit.ammount])
+                        }
+                    }
+
+                    let allTroopCount = 0
+
+                    attackerRangeTroops.forEach(e => allTroopCount += e[1])
+                    attackerMeleeTroops.forEach(e => allTroopCount += e[1])
+
+                    return { ...entry, sourceCastle, attackerMeleeTroops, attackerRangeTroops, allTroopCount }
+                })
+
+                if (!sources.some(e => e.allTroopCount >= minTroopCount))
+                    throw "NO_MORE_TROOPS"
+
+                // Hit the (castle, baron) pair with the shortest distance first
+                let best = undefined
                 const timeSinceEpoch = Date.now()
-                for (let i = 0; i < sortedAreaInfo.length; i++) {
-                    const areaInfo = sortedAreaInfo[i]
-                    if (!options.useTimeSkips) {
-                        if (movements.find(e => e.x == areaInfo.x && e.y == areaInfo.y))
-                            continue
-
-                        if (((areaInfo.timeSinceRequest + areaInfo.extraData[2] * 1000) - timeSinceEpoch) > 0)
-                            continue
-                    }
-                    else {
-                        try {
-                            await skipTarget(areaInfo)
-                        }
-                        catch(e) {
-                            console.warn(e)
-                            continue
-                        }
-                    }
-
-                    index = i
-                    break
-                }
-                if (index == -1)
-                    return
-
-                const AI = sortedAreaInfo[index]
-                const level = getLevel(AI.extraData[1], kingdomID)
-                const attackInfo = getAttackInfo(kingdomID, sourceCastleArea, AI, commander, level, undefined, options)
-
-                const attackerMeleeTroops = []
-                const attackerRangeTroops = []
-
-                for (let i = 0; i < sourceCastle.unitInventory.length; i++) {
-                    const unit = sourceCastle.unitInventory[i]
-                    const unitInfo = units.find(obj => unit.unitID == obj.wodID)
-                    if (unitInfo == undefined)
+                for (const source of sources) {
+                    if (source.allTroopCount < minTroopCount)
                         continue
 
-                    if (unitInfo.fightType == 0) {
-                        if (troopBlackList.includes(unitInfo.wodID))
-                            continue
-                        if (unitInfo.role == "melee")
-                            attackerMeleeTroops.push([unitInfo, unit.ammount])
-                        else if (unitInfo.role == "ranged")
-                            attackerRangeTroops.push([unitInfo, unit.ammount])
+                    for (let i = 0; i < source.sortedAreaInfo.length; i++) {
+                        const areaInfo = source.sortedAreaInfo[i]
+                        const distance = getDistance(source.sourceArea, areaInfo)
+
+                        // Targets are sorted by distance, anything past the current
+                        // best pair can only be farther away
+                        if (best && distance >= best.distance)
+                            break
+
+                        if (!options.useTimeSkips) {
+                            if (movements.find(e => e.x == areaInfo.x && e.y == areaInfo.y))
+                                continue
+
+                            if (((areaInfo.timeSinceRequest + areaInfo.extraData[2] * 1000) - timeSinceEpoch) > 0)
+                                continue
+                        }
+                        else {
+                            try {
+                                await skipTarget(areaInfo)
+                            }
+                            catch(e) {
+                                console.warn(e)
+                                continue
+                            }
+                        }
+
+                        best = { source, AI: areaInfo, distance }
+                        break
                     }
                 }
+                if (best == undefined)
+                    return
 
-                let allTroopCount = 0
+                const { source, AI } = best
+                const { sourceCastle, attackerMeleeTroops, attackerRangeTroops } = source
 
-                attackerRangeTroops.forEach(e => allTroopCount += e[1])
-                attackerMeleeTroops.forEach(e => allTroopCount += e[1])
-
-                if (allTroopCount < minTroopCount)
-                    throw "NO_MORE_TROOPS"
+                const level = getLevel(AI.extraData[1], kingdomID)
+                const attackInfo = getAttackInfo(kingdomID, source.sourceArea, AI, commander, level, undefined, options)
                 
                 let maxWaves = parseInt(options.attackWaves)
                 if (isNaN(maxWaves) || maxWaves == 0)
@@ -299,7 +330,7 @@ async function barronHit(type, kingdomID, options) {
                     await new Promise(resolve => movementEvents.on("return", function self(movementInfo) {
                         if (movementInfo.movement.movementData.kingdomID != kingdomID)
                             return
-                        if (movementInfo.movement.movementData.targetAttack.extraData[0] != sourceCastleArea.extraData[0])
+                        if (!sourceCastleAreas.some(e => e.extraData[0] == movementInfo.movement.movementData.targetAttack.extraData[0]))
                             return
 
                         movementEvents.off("return", self)
@@ -318,31 +349,40 @@ async function barronHit(type, kingdomID, options) {
             }
         }
     }
-    /** @type {import("../../protocols.js").Types.ServerGetAreaInfo} */
-    let gaa
-    do {
-        try {
-            gaa = await getAreaCached(kingdomID,
-                sourceCastleArea.x - 50, sourceCastleArea.y - 50,
-                sourceCastleArea.x + 50, sourceCastleArea.y + 50)
-            error = false
-        } catch (e) {
-            console.warn(e)
-            error = true
-        }
-    } while (error);
+    /** @type {Map<string, import("../../protocols.js").Types.GAAAreaInfo>} */
+    const uniqueTargets = new Map()
+    for (const sourceArea of sourceCastleAreas) {
+        /** @type {import("../../protocols.js").Types.ServerGetAreaInfo} */
+        let gaa
+        do {
+            try {
+                gaa = await getAreaCached(kingdomID,
+                    sourceArea.x - 50, sourceArea.y - 50,
+                    sourceArea.x + 50, sourceArea.y + 50)
+                error = false
+            } catch (e) {
+                console.warn(e)
+                error = true
+            }
+        } while (error);
 
-    let areaInfo = gaa.areaInfo.filter(ai => ai.type == type).sort((a, b) => 
-            (Math.pow(sourceCastleArea.x - a.x, 2) + Math.pow(sourceCastleArea.y - a.y, 2)) -
-            (Math.pow(sourceCastleArea.x - b.x, 2) + Math.pow(sourceCastleArea.y - b.y, 2)))
+        gaa.areaInfo.filter(ai => ai.type == type)
+            .forEach(ai => uniqueTargets.set(`${ai.x}_${ai.y}`, ai))
+    }
 
-    sortedAreaInfo.push(...areaInfo)
+    for (const sourceArea of sourceCastleAreas) {
+        sortedAreaInfo.push({
+            sourceArea,
+            sortedAreaInfo: Array.from(uniqueTargets.values())
+                .sort((a, b) => getDistance(sourceArea, a) - getDistance(sourceArea, b))
+        })
+    }
 
     while (true) {
         if (!options.useTimeSkips) {
             let minimumTimeTillHit = Infinity
 
-            sortedAreaInfo.forEach(ai => {
+            uniqueTargets.forEach(ai => {
                 if (!movements.find(a => a.x == ai.x && a.y == ai.y))
                     minimumTimeTillHit = Math.min(minimumTimeTillHit, (ai.timeSinceRequest + ai.extraData[2] * 1000))
             })

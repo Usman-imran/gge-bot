@@ -1016,7 +1016,7 @@ const clientJoinCastle = (areaID, kingdomID) => {
     sendXT("jca", JSON.stringify({"CID":areaID,"KID":kingdomID}))
 
     const waitObject = waitForResult("jaa", 1000 * 10, o => 
-        o.grc.KID == kingdomID && o.grc.AID == areaID)
+        o.grc?.KID == kingdomID && o.grc?.AID == areaID)
 
     return async () => {
         let [obj, result] = await waitObject
