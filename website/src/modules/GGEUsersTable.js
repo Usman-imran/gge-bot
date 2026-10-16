@@ -200,7 +200,8 @@ function PlayerList({ __, rows, usersStatus, ws, onAdd, onLogs, onSettings }) {
     //App.css centers everything and the page has no base text color
     return <Box sx={{ p: { xs: 1, sm: 2 }, color: "text.primary", textAlign: "left" }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
-            <Typography variant="h6" sx={{ fontSize: "1.05rem", flexGrow: 1 }}>
+            {/* Sits straight on the cover image, the shadow keeps it readable */}
+            <Typography variant="h6" sx={{ fontSize: "1.05rem", flexGrow: 1, textShadow: "0 1px 4px rgba(0, 0, 0, 0.9)" }}>
                 {__("accounts", "Accounts")} ({rows.length})
             </Typography>
             {compact && rows.length > 0 ?

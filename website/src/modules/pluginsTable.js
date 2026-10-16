@@ -198,7 +198,7 @@ export default function PluginsTable({ __, userPlugins, plugins, channels }) {
     })
 
     return (
-        <Paper elevation={3} style={{ minHeight: "45vh", maxHeight: "65vh", backgroundColor: '#131313', display:"flex", flexDirection:"column"}} >
+        <Paper elevation={3} style={{ minHeight: "45vh", maxHeight: "65vh", backgroundColor: 'rgba(10, 10, 14, 0.6)', display:"flex", flexDirection:"column"}} >
             <Box sx={{ p: 1, borderBottom: "solid #1b1b1b 2px" }}>
                 <TextField size="small" fullWidth value={search} onChange={e => setSearch(e.target.value)}
                     placeholder={__("searchPlugins", "Search plugins...")}

@@ -56,9 +56,27 @@ function GrabAssets() {
   </ThemeProvider>
 }
 
+//Frosted glass over the cover background: every Paper (top bar, tables,
+//cards, dialogs, menus) is see-through and blurs what is behind it.
+const glass = (alpha, blur) => ({
+  backgroundColor: `rgba(20, 22, 30, ${alpha})`,
+  backgroundImage: "none", //dark mode adds a lighter gradient per elevation
+  backdropFilter: `blur(${blur}px) saturate(140%)`,
+  WebkitBackdropFilter: `blur(${blur}px) saturate(140%)`,
+  border: "1px solid rgba(255, 255, 255, 0.08)"
+})
+
 const darkTheme = createTheme({
   palette: {
     mode: 'dark'
+  },
+  components: {
+    MuiPaper: { styleOverrides: { root: glass(0.55, 14) } },
+    //Dialogs and menus sit on top of other panels, a bit more solid reads better
+    MuiDialog: { styleOverrides: { paper: glass(0.78, 18) } },
+    MuiPopover: { styleOverrides: { paper: glass(0.85, 18) } },
+    MuiAppBar: { styleOverrides: { root: { ...glass(0.45, 16), borderWidth: "0 0 1px 0" } } },
+    MuiTableCell: { styleOverrides: { root: { borderColor: "rgba(255, 255, 255, 0.08)" } } }
   }
 })
 
@@ -143,6 +161,9 @@ function App({ setLanguage, languageCode, __ }) {
 
   return (
     <div className="App">
+      {/* From public/, CSS url() would be resolved inside src/ by the build */}
+      <div className="app-background" aria-hidden="true"
+        style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/cover.jpg)` }} />
       <TopBar connected={connected}
         channelInfo={channelInfo}
         setLanguage={setLanguage}

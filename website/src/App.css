@@ -1,5 +1,21 @@
 .App {
   text-align: center;
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Cover art behind the dashboard. Slightly blurred and darkened so the glass
+   panels on top stay readable; scaled up so the blur has no soft edges. */
+.app-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  /* background-image is set in App.js (website/public/cover.jpg) */
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  filter: blur(3px) brightness(0.55);
+  transform: scale(1.04);
 }
 
 .App-logo {
