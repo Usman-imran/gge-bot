@@ -11,252 +11,266 @@ import Backdrop from '@mui/material/Backdrop'
 import Checkbox from '@mui/material/Checkbox'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
-import Menu from '@mui/material/Menu'
-import MenuItem from '@mui/material/MenuItem'
+import Chip from '@mui/material/Chip'
+import Tooltip from '@mui/material/Tooltip'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import CardActions from '@mui/material/CardActions'
+import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogActions from '@mui/material/DialogActions'
+import useMediaQuery from '@mui/material/useMediaQuery'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import StopIcon from '@mui/icons-material/Stop'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 
-import { ErrorType, ActionType, LogLevel } from "../types.js"
+import { ErrorType, ActionType } from "../types.js"
 import UserSettings from './userSettings'
-import settings from '../settings.json'
+import LogViewer from './LogViewer'
 
-function Log({ws, __}) {
-    const [currentLogs, setCurrentLogs] = React.useState([])
-    
-    React.useEffect(() => {
-        const logGrabber = msg => {
-            let [err, action, obj] = JSON.parse(msg.data.toString())
+//Status values the bot reports (ggeBot.js), in display order
+const STATUS_FIELDS = [
+    { key: "level", label: "Level", icon: "⭐" },
+    { key: "coin", label: "Coins", icon: "💰" },
+    { key: "rubies", label: "Rubies", icon: "💎" },
+    { key: "food", label: "Food", icon: "🍖" },
+    { key: "mead", label: "Mead", icon: "🍯" },
+    { key: "aquamarine", label: "Aquamarine", icon: "🌊", langKey: "aqua" }
+]
 
-            if (Number(action) !== ActionType.GetLogs)
-                return
+const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
+const fullNumber = new Intl.NumberFormat()
 
-            if (Number(err) !== ErrorType.Success)
-                return
+function StatusChips({ status, __ }) {
+    const shown = STATUS_FIELDS.filter(field => status[field.key] !== undefined && status[field.key] !== null)
+    if (shown.length === 0)
+        return <Typography variant="body2" color="text.secondary">-</Typography>
 
-            setCurrentLogs(obj[0].splice(obj[1], obj[0].length - 1).concat(obj[0]).map((obj, index) => {
-                let items = obj[1].map(__).join("")
-                return <div key={index} style={{
-                    color: obj[0] === LogLevel.Error ? "red" :
-                        obj[0] === LogLevel.Warn ? "yellow" : "blue"
-                }}>{items}</div>
-            }
-            ).reverse())
-        }
-        ws.addEventListener("message", logGrabber)
-        return () => ws.removeEventListener("message", logGrabber)
-
-    }, [ws, __])
-
-    return (
-        <Paper sx={{ overflow: 'auto'}}>
-            <div onClick={e => e.stopPropagation()}
-                style={{ width: "100%", height: "100%" }}>
-                <Typography variant="subtitle1" component="div" align='left' padding={"10px"}>
-                    {currentLogs}
-                </Typography>
-            </div>
-        </Paper>)
+    return <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+        {shown.map(field => {
+            const value = Number(status[field.key])
+            const label = __(field.langKey ?? field.key, field.label)
+            return <Tooltip key={field.key} title={`${label}: ${Number.isFinite(value) ? fullNumber.format(value) : status[field.key]}`}>
+                <Chip size="small" variant="outlined"
+                    label={`${field.icon} ${Number.isFinite(value) ? compactNumber.format(value) : status[field.key]}`} />
+            </Tooltip>
+        })}
+    </Box>
 }
-function Language({ languageCode, setLanguage }) {
-    const [anchorEl, setAnchorEl] = React.useState(null) 
-    const open = Boolean(anchorEl)
-    const handleClick = event => { setAnchorEl(event.currentTarget) }
-    const handleClose = () => { setAnchorEl(null) }
-    
-    return (
-        <>
-            <Button
-                id="basic-button"
-                aria-controls={open ? 'basic-menu' : undefined}
-                aria-haspopup="true"
-                aria-expanded={open ? 'true' : undefined}
-                onClick={handleClick}
-            >
-                {languageCode}
-            </Button>
-            <Menu
-                id="basic-menu"
-                anchorEl={anchorEl}
-                open={open}
-                onClose={handleClose}
-                slotProps={{
-                    list: {
-                        'aria-labelledby': 'basic-button',
-                    },
-                }}
-            >
-                <MenuItem onClick={() => {setLanguage('en'); handleClose() }}>EN</MenuItem>
-                <MenuItem onClick={() => {setLanguage('pl'); handleClose() }}>PL</MenuItem>
-                <MenuItem onClick={() => {setLanguage('de'); handleClose() }}>DE</MenuItem>
-                <MenuItem onClick={() => {setLanguage('tr'); handleClose() }}>TR</MenuItem>
-                <MenuItem onClick={() => {setLanguage('ar'); handleClose() }}>AR</MenuItem>
-                <MenuItem onClick={() => {setLanguage('cs'); handleClose() }}>CS</MenuItem>
-            </Menu>
-        </>
-    )
+
+function ErrorBadge({ __ }) {
+    return <Tooltip title={__("botErrorHint", "The bot stopped after an error. Open Logs to see why.")}>
+        <Chip size="small" color="error" icon={<ErrorOutlineIcon />} label={__("error", "Error")} />
+    </Tooltip>
 }
-function PlayerTable({ setLanguage, __, languageCode, rows, usersStatus, ws, channelInfo, handleSettingsOpen, handleLogOpen, setSelectedUser, setOpenSettings }) {
+
+const enabledPlugins = row => Object.entries(row.plugins ?? {})
+    .filter(([_, value]) => Boolean(value.state) === true && Boolean(value.forced) !== true)
+    .map(([key]) => key)
+
+function PluginChips({ row, __ }) {
+    const names = enabledPlugins(row)
+    if (names.length === 0)
+        return <Typography variant="body2" color="text.secondary">-</Typography>
+    return <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+        {names.map(name => <Chip key={name} size="small" label={__(name)} />)}
+    </Box>
+}
+
+//Running state is shown right away and corrected by the next user list
+//from the server (a crashed bot comes back as stopped).
+function useRunningState(row) {
+    const [state, setState] = React.useState(Boolean(row.state))
+    React.useEffect(() => setState(Boolean(row.state)), [row])
+    return [state, setState]
+}
+
+function RowActions({ row, ws, state, setState, onLogs, onSettings, __ }) {
+    return <>
+        <Button variant="text" size="small" onClick={onLogs}>{__("logs")}</Button>
+        <Button variant="text" size="small" onClick={onSettings}>{__("settings")}</Button>
+        <Button variant="contained" size="small"
+            color={state ? "error" : "success"}
+            startIcon={state ? <StopIcon /> : <PlayArrowIcon />}
+            onClick={() => {
+                row.state = !state
+                ws.send(JSON.stringify([ErrorType.Success, ActionType.SetUser, row]))
+                setState(!state)
+            }}
+            sx={{ ml: 1, minWidth: 92 }}>{state ? __("stop") : __("start")}</Button>
+    </>
+}
+
+function PlayerRow({ row, status, ws, selected, toggleSelected, onLogs, onSettings, __ }) {
+    const [state, setState] = useRunningState(row)
+
+    return <TableRow hover selected={selected}
+        sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+        <TableCell padding="checkbox">
+            <Checkbox color="primary" checked={selected} onClick={toggleSelected}
+                inputProps={{ 'aria-label': `${__("select", "Select")} ${row.name}` }} />
+        </TableCell>
+        <TableCell component="th" scope="row">
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                <Typography fontWeight="bold">{row.name}</Typography>
+                {status.hasError ? <ErrorBadge __={__} /> : undefined}
+            </Box>
+        </TableCell>
+        <TableCell sx={{ maxWidth: "25vw" }}><PluginChips row={row} __={__} /></TableCell>
+        <TableCell><StatusChips status={status} __={__} /></TableCell>
+        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+            <RowActions row={row} ws={ws} state={state} setState={setState} onLogs={onLogs} onSettings={onSettings} __={__} />
+        </TableCell>
+    </TableRow>
+}
+
+function PlayerCard({ row, status, ws, selected, toggleSelected, onLogs, onSettings, __ }) {
+    const [state, setState] = useRunningState(row)
+
+    return <Card variant="outlined" sx={{ borderColor: status.hasError ? "error.main" : undefined }}>
+        <CardContent sx={{ pb: 1 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, flexWrap: "wrap" }}>
+                <Checkbox color="primary" checked={selected} onClick={toggleSelected} sx={{ p: 0.5 }}
+                    inputProps={{ 'aria-label': `${__("select", "Select")} ${row.name}` }} />
+                <Typography fontWeight="bold">{row.name}</Typography>
+                {status.hasError ? <ErrorBadge __={__} /> : undefined}
+            </Box>
+            <Typography variant="caption" color="text.secondary">{__("status")}</Typography>
+            <Box sx={{ mb: 1 }}><StatusChips status={status} __={__} /></Box>
+            <Typography variant="caption" color="text.secondary">{__("plugins")}</Typography>
+            <PluginChips row={row} __={__} />
+        </CardContent>
+        <CardActions sx={{ justifyContent: "flex-end", pt: 0 }}>
+            <RowActions row={row} ws={ws} state={state} setState={setState} onLogs={onLogs} onSettings={onSettings} __={__} />
+        </CardActions>
+    </Card>
+}
+
+function ConfirmRemove({ open, names, onCancel, onConfirm, __ }) {
+    return <Dialog open={open} onClose={onCancel}>
+        <DialogTitle>{__("removeConfirmTitle", "Remove accounts?")}</DialogTitle>
+        <DialogContent>
+            <DialogContentText>
+                {__("removeConfirmText", "These accounts and their settings will be deleted from the bot:")}
+            </DialogContentText>
+            <Box component="ul" sx={{ mt: 1, mb: 0 }}>
+                {names.map(name => <li key={name}><Typography fontWeight="bold">{name}</Typography></li>)}
+            </Box>
+        </DialogContent>
+        <DialogActions>
+            <Button onClick={onCancel}>{__("cancel", "Cancel")}</Button>
+            <Button onClick={onConfirm} color="error" variant="contained" startIcon={<DeleteIcon />}>{__("remove")}</Button>
+        </DialogActions>
+    </Dialog>
+}
+
+function PlayerList({ __, rows, usersStatus, ws, onAdd, onLogs, onSettings }) {
     const [selected, setSelected] = React.useState([])
+    const [confirmOpen, setConfirmOpen] = React.useState(false)
+    const compact = useMediaQuery(theme => theme.breakpoints.down('md'))
 
-    const handleSelectAllClick = event => {
-        if (event.target.checked) {
-            const newSelected = rows.map(n => n.id)
-            setSelected(newSelected)
-            return
-        }
+    //Accounts removed elsewhere drop out of the selection
+    const selectedRows = rows.filter(row => selected.includes(row.id))
+    const allSelected = rows.length > 0 && selectedRows.length === rows.length
+
+    const toggleSelected = id => setSelected(current =>
+        current.includes(id) ? current.filter(e => e !== id) : [...current, id])
+
+    const removeSelected = () => {
+        ws.send(JSON.stringify([ErrorType.Success, ActionType.RemoveUser, selectedRows]))
         setSelected([])
+        setConfirmOpen(false)
     }
 
-    return <TableContainer component={Paper}>
-        <Table sx={{ minWidth: 650 }} aria-label="simple table">
-            <TableHead>
-                <TableRow>
-                    <TableCell padding="checkbox">
-                        <Checkbox
-                            color="primary"
-                            checked={rows.length === selected.length}
-                            onClick={handleSelectAllClick}
-                            inputProps={{
-                                'aria-label': 'select all entries',
-                            }}
-                        />
-                    </TableCell>
-                    <TableCell align="left">{__("name")}</TableCell>
-                    <TableCell align="left" padding='none'>{__("plugins")}</TableCell>
-                    <TableCell>{__("status")}</TableCell>
-                    <TableCell align='right' padding='none' style={{width:"max-content"}}>
-                        <Language setLanguage={setLanguage} languageCode={languageCode} />
-                        <Button
-                            style={{ margin: "10px", maxHeight: '32px', minHeight: '32px' }}
-                            onClick={async () =>
-                                window.open(`https://discord.com/oauth2/authorize?client_id=${channelInfo[0]}&permissions=8&response_type=code&redirect_uri=${window.location.protocol === 'https:' ? "https" : "http"}%3A%2F%2F${window.location.hostname}%3A${(settings.port ?? window.location.port) !== '' ? (settings.port ?? window.location.port) : window.location.protocol === 'https:' ? "443" : "80"}%2FdiscordAuth&integration_type=0&scope=identify+guilds.join+bot`, "_blank")}
-                        >{__("linkDiscord")}</Button>
-                        <Button style={{ maxWidth: '64px', maxHeight: '32px', minWidth: '32px', minHeight: '32px', marginRight: "10px" }} onClick={handleSettingsOpen}>+</Button>
-                    </TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-                {rows.map((row, index) => {
-                    function PlayerRow() {
-                        let getEnabledPlugins = () => {
-                            let enabledPlugins = []
-                            Object.entries(row.plugins).forEach(([key, value]) => {
-                                if (Boolean(value.state) === true && Boolean(value.forced) !== true)
-                                    enabledPlugins.push(key)
-                                return
-                            })
-                            return enabledPlugins
-                        }
+    const itemProps = row => ({
+        row,
+        status: usersStatus[row.id] ?? {},
+        ws,
+        __,
+        selected: selected.includes(row.id),
+        toggleSelected: () => toggleSelected(row.id),
+        onLogs: () => onLogs(row),
+        onSettings: () => onSettings(row)
+    })
 
-                        const isItemSelected = selected.includes(row.id)
-                        const labelId = `enhanced-table-checkbox-${index}`
-                        const [state, setState] = React.useState(row.state)
-                        row.state = state
+    //App.css centers everything and the page has no base text color
+    return <Box sx={{ p: { xs: 1, sm: 2 }, color: "text.primary", textAlign: "left" }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
+            <Typography variant="h6" sx={{ fontSize: "1.05rem", flexGrow: 1 }}>
+                {__("accounts", "Accounts")} ({rows.length})
+            </Typography>
+            {compact && rows.length > 0 ?
+                <Button size="small" onClick={() => setSelected(allSelected ? [] : rows.map(row => row.id))}>
+                    {allSelected ? __("selectNone", "Select none") : __("selectAll", "Select all")}
+                </Button> : undefined}
+            <Button variant="outlined" color="error" size="small" startIcon={<DeleteIcon />}
+                disabled={selectedRows.length === 0} onClick={() => setConfirmOpen(true)}>
+                {__("remove")}{selectedRows.length > 0 ? ` (${selectedRows.length})` : ""}
+            </Button>
+            <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={onAdd}>
+                {__("addAccount", "Add account")}
+            </Button>
+        </Box>
 
-                        let status = usersStatus[row.id] ?? {}
-                        return (<TableRow style={status?.hasError ? { border: "red solid 2px" } : {}}
-                            sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                        >
-                            <TableCell padding="checkbox">
-                                <Checkbox
-                                    color="primary"
-                                    checked={isItemSelected}
-                                    onClick={() => {
-                                        let index = selected.indexOf(row.id)
-                                        if (index < 0) {
-                                            selected.push(row.id)
-                                            setSelected(Array.from(selected))
-                                            return
-                                        }
-                                        setSelected(selected.toSpliced(index, 1))
-                                    }}
-                                    inputProps={{
-                                        'aria-labelledby': labelId,
-                                    }}
-                                />
-                            </TableCell>
-                            <TableCell component="th" scope="row">{row.name}</TableCell>
+        {rows.length === 0 ?
+            <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
+                <Typography color="text.secondary">{__("noAccounts", "No accounts yet. Click \"Add account\" to add your first game account.")}</Typography>
+            </Paper> :
+            compact ?
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {rows.map(row => <PlayerCard key={row.id} {...itemProps(row)} />)}
+                </Box> :
+                <TableContainer component={Paper}>
+                    <Table aria-label={__("accounts", "Accounts")}>
+                        <TableHead>
+                            <TableRow>
+                                <TableCell padding="checkbox">
+                                    <Checkbox color="primary" checked={allSelected}
+                                        indeterminate={selectedRows.length > 0 && !allSelected}
+                                        onClick={() => setSelected(allSelected ? [] : rows.map(row => row.id))}
+                                        inputProps={{ 'aria-label': __("selectAll", "Select all") }} />
+                                </TableCell>
+                                <TableCell>{__("name")}</TableCell>
+                                <TableCell>{__("plugins")}</TableCell>
+                                <TableCell>{__("status")}</TableCell>
+                                <TableCell />
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {rows.map(row => <PlayerRow key={row.id} {...itemProps(row)} />)}
+                        </TableBody>
+                    </Table>
+                </TableContainer>}
 
-                            <TableCell align="left" padding='none'  sx={{scrollbarColor: "#5e6269 #2d2f31", scrollbarWidth:"thin", maxWidth: "20vw", overflow: "auto", whiteSpace: "nowrap"}}>
-                                    {getEnabledPlugins().map(__).join(" ")}
-                            </TableCell>
-                            <TableCell>
-                                <Box sx={{ display: 'flex' }}>
-                                    <Box sx={{ display: 'flex', flexDirection: "column" }} paddingRight={"10px"}>
-                                        <Typography>{status.aquamarine ? __("aqua") : ""}</Typography>
-                                        <Typography>{status.aquamarine ?? ""}</Typography>
-                                    </Box>
-                                    <Box sx={{ display: 'flex', flexDirection: "column" }} paddingRight={"10px"}>
-                                        <Typography>{status.level ? __("level") : ""}</Typography>
-                                        <Typography>{status.level ?? ""}</Typography>
-                                    </Box>
-                                    <Box sx={{ display: 'flex', flexDirection: "column" }} paddingRight={"10px"}>
-                                        <Typography>{status.mead ? __("mead") : ""}</Typography>
-                                        <Typography>{status.mead ?? ""}</Typography>
-                                    </Box>
-                                    <Box sx={{ display: 'flex', flexDirection: "column" }} paddingRight={"10px"}>
-                                        <Typography>{status.food ? __("food") : ""}</Typography>
-                                        <Typography>{status.food ?? ""}</Typography>
-                                    </Box>
-                                    <Box sx={{ display: 'flex', flexDirection: "column" }} paddingRight={"10px"}>
-                                        <Typography>{status.coin ? __("coin") : ""}</Typography>
-                                        <Typography>{status.coin ?? ""}</Typography>
-                                    </Box>
-                                    <Box sx={{ display: 'flex', flexDirection: "column" }} paddingRight={"10px"}>
-                                        <Typography>{status.rubies ? __("rubies") : ""}</Typography>
-                                        <Typography>{status.rubies ?? ""}</Typography>
-                                    </Box>
-                                </Box>
-                            </TableCell>
-                            <TableCell align="right" padding='none' style={{ padding: "10px" }}>
-                                <Button variant="text" onClick={() => {
-                                    ws.send(JSON.stringify([ErrorType.Success, ActionType.GetLogs, row]))
-                                    handleLogOpen()
-                                }}>{__("logs")}</Button>
-                                <Button variant="text" onClick={() => {
-                                    setSelectedUser(row)
-                                    setOpenSettings(true)
-                                }}>{__("settings")}</Button>
-                                <Button variant="contained"
-                                    onClick={() => {
-                                        row.state = !state
-                                        ws.send(JSON.stringify([ErrorType.Success, ActionType.SetUser, row]))
-                                        setState(!state)
-                                    }}
-                                    style={{ maxWidth: '64px', maxHeight: '32px', minWidth: '32px', minHeight: '32px', marginLeft: "10px" }}>{state ? __("stop") : __("start")}</Button>
-                            </TableCell>
-                        </TableRow>)
-                    }
-                    return <PlayerRow key={row.id} />
-                })}
-                <TableRow
-                    sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                >
-                    <TableCell align='right' padding='none' />
-                    <TableCell align='right' padding='none' />
-                    <TableCell align='right' padding='none' />
-                    <TableCell align='right' padding='none' />
-                    <TableCell align='right' padding='none'>
-                        <Button variant="contained" style={{ maxWidth: '64px', maxHeight: '32px', minWidth: '32px', minHeight: '32px', paddingLeft: "38px", paddingRight: "38px", margin: "10px" }} onClick={() => {
-                            ws.send(JSON.stringify([ErrorType.Success, ActionType.RemoveUser, rows.filter((e) => selected.includes(e.id))]))
-                        }}>{__("remove")}</Button>
-                    </TableCell>
-                </TableRow>
-            </TableBody>
-        </Table></TableContainer>
+        <ConfirmRemove open={confirmOpen} names={selectedRows.map(row => row.name)}
+            onCancel={() => setConfirmOpen(false)} onConfirm={removeSelected} __={__} />
+    </Box>
 }
-export default function GGEUserTable({setLanguage, __, languageCode, rows, usersStatus, ws, channelInfo, plugins}) {
+
+export default function GGEUserTable({ __, rows, usersStatus, ws, channelInfo, plugins, expectSave }) {
     const user = {}
 
     const [openSettings, setOpenSettings] = React.useState(false)
     const [selectedUser, setSelectedUser] = React.useState(user)
-    const [openLogs, setOpenLogs] = React.useState(false)
+    const [logUser, setLogUser] = React.useState(undefined)
 
-    const handleSettingsOpen = () => setOpenSettings(true)
     const handleSettingsClose = () => {
         setOpenSettings(false)
         setSelectedUser(user)
     }
-    const handleLogClose = () => setOpenLogs(false)
-    const handleLogOpen = () => setOpenLogs(true)
+
+    const openLogs = row => {
+        ws.send(JSON.stringify([ErrorType.Success, ActionType.GetLogs, row]))
+        setLogUser(row)
+    }
+    const closeLogs = () => {
+        ws.send(JSON.stringify([ErrorType.Success, ActionType.GetLogs, undefined]))
+        setLogUser(undefined)
+    }
 
     return (
         <>
@@ -272,33 +286,22 @@ export default function GGEUserTable({setLanguage, __, languageCode, rows, users
                     closeBackdrop={handleSettingsClose}
                     plugins={plugins}
                     channels={channelInfo[1]}
+                    expectSave={expectSave}
                     __={__} />
             </Backdrop>
-            <Backdrop
-            sx={theme => ({ color: '#fff', zIndex: theme.zIndex.drawer + 1 })}
-            open={openLogs}
-            onClick={() => {
-                ws.send(JSON.stringify([ErrorType.Success, ActionType.GetLogs, undefined]))
-                
-                handleLogClose()
-            }}
-            style={{ maxHeight: '100%', overflow: 'auto' }} >
-                <Log ws={ws} __={__}/>
-                </Backdrop>
-            <PlayerTable 
-                setLanguage={setLanguage} 
-                __={__} 
-                languageCode={languageCode} 
-                rows={rows} 
-                usersStatus={usersStatus} 
-                ws={ws} 
-                channelInfo={channelInfo}
-                handleSettingsOpen={handleSettingsOpen}
-                handleLogOpen={handleLogOpen}
-                setSelectedUser={setSelectedUser}
-                setOpenSettings={setOpenSettings}
-                plugins={plugins}
-                />
+            <LogViewer ws={ws} user={logUser} open={logUser !== undefined} onClose={closeLogs} __={__} />
+            <PlayerList
+                __={__}
+                rows={rows}
+                usersStatus={usersStatus}
+                ws={ws}
+                onAdd={() => setOpenSettings(true)}
+                onLogs={openLogs}
+                onSettings={row => {
+                    setSelectedUser(row)
+                    setOpenSettings(true)
+                }}
+            />
         </>
     )
 }

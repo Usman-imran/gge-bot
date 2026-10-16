@@ -6,6 +6,8 @@ import * as React from 'react'
 import './App.css'
 import { ErrorType, GetErrorTypeName, ActionType, User } from "./types.js"
 import GGEUserTable from './modules/GGEUsersTable'
+import TopBar from './modules/TopBar'
+import { NotifyProvider, useNotify } from './modules/notify'
 import settings from './settings.json'
 
 function GrabAssets() {
@@ -36,12 +38,22 @@ function GrabAssets() {
       transform: "translate(-50%, -50%)"
     }} />
   }
-  const __ = key => {
-    if(lang[key] == undefined)
-      console.warn(`[Language] ${key} key not found`)
-    return lang[key] || key
+  //__(key, fallback): the fallback (English) is used when a language file
+  //does not have the key yet. Only a string counts as fallback, because
+  //__ is also passed straight to Array.map, which adds the index.
+  const __ = (key, fallback) => {
+    if (lang[key])
+      return lang[key]
+    if (typeof fallback === "string")
+      return fallback
+    console.warn(`[Language] ${key} key not found`)
+    return key
   }
-  return <App setLanguage={setLanguage} languageCode={cookies.lang} __={__} />
+  return <ThemeProvider theme={darkTheme}>
+    <NotifyProvider>
+      <App setLanguage={setLanguage} languageCode={cookies.lang} __={__} />
+    </NotifyProvider>
+  </ThemeProvider>
 }
 
 const darkTheme = createTheme({
@@ -50,24 +62,49 @@ const darkTheme = createTheme({
   }
 })
 
-function App({setLanguage, languageCode, __}) {
+//Waiting for the GetUsers answer that follows a save, see expectSave
+const SAVE_TIMEOUT_MS = 8000
+
+function App({ setLanguage, languageCode, __ }) {
   const [users, setUsers] = React.useState([])
   const [usersStatus, setUsersStatus] = React.useState({})
   const [plugins, setPlugins] = React.useState([])
   const [channelInfo, setChannelInfo] = React.useState([])
+  const [connected, setConnected] = React.useState(false)
+  const notify = useNotify()
+
+  //The server has no "saved" answer: after AddUser/SetUser it sends the new
+  //user list (GetUsers). The first list after a save confirms it.
+  const pendingSave = React.useRef(undefined)
+  const expectSave = React.useCallback(() => {
+    clearTimeout(pendingSave.current)
+    pendingSave.current = setTimeout(() => {
+      pendingSave.current = undefined
+      notify(__("saveNoAnswer", "No answer from the bot server, the change may not be saved."), "warning")
+    }, SAVE_TIMEOUT_MS)
+  }, [notify, __])
+
+  //Messages reach these through refs, the socket itself is created once
+  const handlers = React.useRef({})
+  handlers.current = { notify, __ }
+
   let ws = React.useMemo(() => {
     const usersStatus = {}
     const ws = new ReconnectingWebSocket(`${window.location.protocol === 'https:' ? "wss" : "ws"}://${window.location.hostname}:${settings.port ?? window.location.port}`, [], { WebSocket: WebSocket, minReconnectionDelay: 3000 })
 
+    ws.addEventListener("open", () => setConnected(true))
+    ws.addEventListener("close", () => setConnected(false))
+
     ws.addEventListener("message", (msg) => {
       let [err, action, obj] = JSON.parse(msg.data.toString())
+      const { notify, __ } = handlers.current
       if (err)
         console.error(GetErrorTypeName(err))
 
       switch (Number(action)) {
         case ActionType.GetUUID:
-          if(err === ErrorType.Unauthenticated)
-          return window.location.href = "signin.html"
+          if (err === ErrorType.Unauthenticated)
+            return window.location.href = "signin.html"
           break
         case ActionType.GetChannels:
           setChannelInfo(obj ?? [])
@@ -78,10 +115,24 @@ function App({setLanguage, languageCode, __}) {
 
           setUsers(obj[0].map(e => new User(e)))
           setPlugins(obj[1])
+
+          if (pendingSave.current) {
+            clearTimeout(pendingSave.current)
+            pendingSave.current = undefined
+            notify(__("saved", "Saved."), "success")
+          }
           break
         case ActionType.StatusUser:
           usersStatus[obj.id] = obj
           setUsersStatus(structuredClone(usersStatus))
+          break
+        case ActionType.RemoveUser:
+          if (err !== ErrorType.Success)
+            notify(__("removeFailed", "Some accounts could not be removed."), "error")
+          break
+        case ActionType.GetLogs:
+          if (err !== ErrorType.Success)
+            notify(__("logsNotRunning", "This account is not running, so there are no logs yet."), "info")
           break
         default:
           return
@@ -92,9 +143,12 @@ function App({setLanguage, languageCode, __}) {
 
   return (
     <div className="App">
-      <ThemeProvider theme={darkTheme}>
-        <GGEUserTable ws={ws} plugins={plugins} rows={users} usersStatus={usersStatus} channelInfo={channelInfo} setLanguage={setLanguage} languageCode={languageCode} __={__} />
-      </ThemeProvider>
+      <TopBar connected={connected}
+        channelInfo={channelInfo}
+        setLanguage={setLanguage}
+        languageCode={languageCode}
+        __={__} />
+      <GGEUserTable ws={ws} plugins={plugins} rows={users} usersStatus={usersStatus} channelInfo={channelInfo} expectSave={expectSave} __={__} />
     </div>
   )
 }

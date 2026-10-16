@@ -18,6 +18,24 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import Slider from '@mui/material/Slider'
 import Typography from '@mui/material/Typography'
 import { Container } from '@mui/material'
+import SearchIcon from '@mui/icons-material/Search'
+
+const isNumberText = value => /^\s*-?\d+(\.\d+)?\s*$/.test(String(value ?? ""))
+
+//Groups come from where the plugin file lives, e.g. plugins/attack/attackKhan
+const GROUPS = {
+    attack: "Attacks",
+    discord: "Discord",
+    "plugins-extra": "Extra",
+    "plugins-exploits": "Exploits"
+}
+const pluginGroup = plugin => {
+    const parts = String(plugin.filename ?? "").split("/")
+    if (parts[0] !== "plugins")
+        return parts[0]
+    return parts.length > 2 ? parts[1] : "general"
+}
+const groupLabel = (group, __) => __(`pluginGroup_${group}`, GROUPS[group] ?? (group === "general" ? "General" : group))
 
 function PluginOption({ pluginData, channels, userPlugins: userPlugins, plugin, __ }) {
     const [value, setValue] = React.useState(userPlugins[plugin.key][pluginData.key] ??= pluginData.default)
@@ -31,17 +49,25 @@ function PluginOption({ pluginData, channels, userPlugins: userPlugins, plugin, 
             return <></>
         case "Label":
             return <Typography variant="subtitle2" sx={{ width: '100%', borderBottom: '1px solid rgba(144, 202, 249, 0.3)', pb: 0.2, mb: 0.2, color: '#90caf9', mt: 0.5, fontWeight: 'bold', textTransform: 'uppercase', fontSize: '0.7rem' }}>{__(pluginData.key)}</Typography>
-        case "Text":
+        case "Text": {
+            //Options with a numeric default expect a number. The bot stores
+            //them as text, so we only warn and keep sending the text as is.
+            const numeric = isNumberText(pluginData.default)
+            const invalid = numeric && String(value).trim() !== "" && !isNumberText(value)
             return <TextField
                 fullWidth
                 label={__(pluginData.key)}
                 variant="outlined"
                 size="small"
-                
+
                 value={value}
                 onChange={e => onChange(e.target.value)}
+                error={invalid}
+                helperText={invalid ? __("numberExpected", "Enter a number.") : undefined}
+                slotProps={numeric ? { htmlInput: { inputMode: "decimal" } } : undefined}
                 sx={{ '& .MuiInputBase-root': { fontSize: '0.75rem' }, '& .MuiInputLabel-root': { fontSize: '0.75rem' }, my: 0.5 }}
             />
+        }
         case "Checkbox":
             return <FormControlLabel
                 control={<Checkbox size="small" sx={{ p: 0.5, color: '#90caf9', '&.Mui-checked': { color: '#90caf9' } }} />}
@@ -107,7 +133,7 @@ const PluginOptionContainer = ({ plugin, channels, userPlugins, __ }) => {
         }
     </>
     }
-function Plugin({ plugin, __, userPlugins, selectedPlugin, setSelectedPlugin }) {
+function Plugin({ plugin, __, userPlugins, selectedPlugin, setSelectedPlugin, onToggle }) {
     userPlugins[plugin.key] ??= {}
     const [state, setState] = React.useState(userPlugins[plugin.key].state)
     function onClick() {
@@ -138,6 +164,7 @@ function Plugin({ plugin, __, userPlugins, selectedPlugin, setSelectedPlugin }) 
                         onClick={() => {
                             setState(!state)
                             userPlugins[plugin.key].state = !state
+                            onToggle?.()
                         }}>
                         {__(state ? "stop" : "start")}
                     </Button> : <Button
@@ -151,21 +178,58 @@ function Plugin({ plugin, __, userPlugins, selectedPlugin, setSelectedPlugin }) 
 }
 export default function PluginsTable({ __, userPlugins, plugins, channels }) {
     const [selectedPlugin, setSelectedPlugin] = React.useState(undefined) //, maxHeight: "40vh"
+    const [search, setSearch] = React.useState("")
+    //Re-render the group counts when a plugin is switched on/off
+    const [, setToggles] = React.useState(0)
+    const onToggle = () => setToggles(n => n + 1)
+
+    const query = search.trim().toLowerCase()
+    const matching = plugins.filter(plugin => !query ||
+        __(plugin.key).toLowerCase().includes(query) || plugin.key.toLowerCase().includes(query))
+
+    //Keep the server's order inside a group, groups in order of first appearance
+    const groups = []
+    matching.forEach(plugin => {
+        const name = pluginGroup(plugin)
+        let group = groups.find(e => e.name === name)
+        if (!group)
+            groups.push(group = { name, plugins: [] })
+        group.plugins.push(plugin)
+    })
 
     return (
         <Paper elevation={3} style={{ minHeight: "45vh", maxHeight: "65vh", backgroundColor: '#131313', display:"flex", flexDirection:"column"}} >
+            <Box sx={{ p: 1, borderBottom: "solid #1b1b1b 2px" }}>
+                <TextField size="small" fullWidth value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder={__("searchPlugins", "Search plugins...")}
+                    slotProps={{ input: { startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1, color: "text.secondary" }} /> } }} />
+            </Box>
             <TableContainer sx={{ scrollbarColor: "#5e6269 #2d2f31"}}>
-                <Table aria-label="plugins table">
+                <Table aria-label="plugins table" size="small">
                     <TableBody>
-                        {plugins.map((plugin, index) =>
-                            <Plugin
-                                plugin={plugin}
-                                key={index}
-                                userPlugins={userPlugins}
-                                __={__}
-                                selectedPlugin={selectedPlugin}
-                                setSelectedPlugin={setSelectedPlugin}
-                            />)}
+                        {groups.length === 0 ?
+                            <TableRow><TableCell sx={{ color: "text.secondary" }}>{__("noPluginsMatch", "No plugins match the search.")}</TableCell></TableRow> :
+                            groups.map(group => {
+                                const enabled = group.plugins.filter(plugin => !plugin.force && userPlugins[plugin.key]?.state).length
+                                const switchable = group.plugins.filter(plugin => !plugin.force).length
+                                return <React.Fragment key={group.name}>
+                                    <TableRow>
+                                        <TableCell colSpan={2} sx={{ bgcolor: "#1d1f22", color: "#90caf9", fontWeight: "bold", fontSize: "0.75rem", textTransform: "uppercase", py: 0.75 }}>
+                                            {groupLabel(group.name, __)} ({enabled}/{switchable})
+                                        </TableCell>
+                                    </TableRow>
+                                    {group.plugins.map(plugin =>
+                                        <Plugin
+                                            plugin={plugin}
+                                            key={plugin.key}
+                                            userPlugins={userPlugins}
+                                            __={__}
+                                            selectedPlugin={selectedPlugin}
+                                            setSelectedPlugin={setSelectedPlugin}
+                                            onToggle={onToggle}
+                                        />)}
+                                </React.Fragment>
+                            })}
                     </TableBody>
                 </Table>
             </TableContainer>

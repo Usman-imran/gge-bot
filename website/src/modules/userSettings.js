@@ -15,6 +15,7 @@ import Typography from '@mui/material/Typography'
 import { ErrorType, ActionType } from "../types.js"
 import PluginsTable from './pluginsTable'
 import settings from '../settings.json'
+import { useNotify } from './notify'
 
 let lang = JSON.parse(await (await fetch(`${window.location.protocol === 'https:' ? "https" : "http"}://${window.location.hostname}:${settings.port ?? window.location.port}/lang.json`)).text())
 
@@ -52,7 +53,8 @@ for (var key in _instances) {
         instances.push({id: obj.getAttribute("value"),server,zone,instanceLocaId,instanceName})
 }
 
-export default function UserSettings({ __, selectedUser, channels, plugins, ws, closeBackdrop }) {
+export default function UserSettings({ __, selectedUser, channels, plugins, ws, closeBackdrop, expectSave }) {
+    const notify = useNotify()
     selectedUser.name ??= ""
     selectedUser.plugins ??= {}
     const isNewUser = selectedUser.name === ""
@@ -63,7 +65,7 @@ export default function UserSettings({ __, selectedUser, channels, plugins, ws, 
 
     return (
         <div onClick={event => event.stopPropagation()} style={{ width: 'max-content' }}>
-            <Paper sx={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', width: "80vw" }}>
+            <Paper sx={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', width: { xs: "96vw", md: "80vw" } }}>
                 <Box sx={{ p: 2, flexGrow: 1, overflowY: 'auto' }}>
                     <FormGroup row={true} sx={{ mb: 2, gap: 2}}>
                         <TextField required size="small" label={__("username")} value={name} onChange={e => setName(e.target.value)} disabled={!isNewUser} />
@@ -101,6 +103,8 @@ export default function UserSettings({ __, selectedUser, channels, plugins, ws, 
                                 obj.id = selectedUser.id
                                 if (pass === "") obj.pass = selectedUser.pass
                             }
+                            else if (name.trim() === "" || pass === "")
+                                return notify(__("accountDetailsMissing", "Enter the game username and password."), "error")
 
                             ws.send(JSON.stringify([
                                 ErrorType.Success,
@@ -108,6 +112,7 @@ export default function UserSettings({ __, selectedUser, channels, plugins, ws, 
                                 obj
                             ]))
 
+                            expectSave?.()
                             closeBackdrop()
                         }}
                     >
