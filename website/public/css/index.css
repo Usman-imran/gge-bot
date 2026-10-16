@@ -230,3 +230,31 @@ html, body {
     color: #7882f5;
     text-decoration: none;
 }
+
+/* Cover background with a frosted glass panel, same look as the dashboard
+   (website/src/App.css + the theme in App.js). Scaled up so the blur has no
+   soft edges. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: url("../cover.jpg") center / cover no-repeat;
+    filter: blur(3px) brightness(0.55);
+    transform: scale(1.04);
+}
+.front-panel {
+    background-color: rgba(20, 22, 30, 0.55);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+.input-field {
+    background-color: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.login-info-banner {
+    color: #ff8a80;
+}
