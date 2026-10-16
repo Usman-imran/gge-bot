@@ -25,8 +25,9 @@ if (require('node:worker_threads').isMainThread) {
 }
 
 const path = require('node:path')
-const { events, botConfig, sendXT, waitForResult, quietTimeoutKeys, quietResultKeys, playerInfo } = require("../ggeBot.js")
-const { ClientCommands, KingdomID, AreaType, getResourceCastleList } = require("../protocols.js")
+const { events, botConfig, sendXT, waitForResult, quietResultKeys, playerInfo } = require("../ggeBot.js")
+const { ClientCommands, KingdomID } = require("../protocols.js")
+const { visitCastles } = require("../castleVisit.js")
 const unitsData = require("../items/units.json")
 const err = require("../err.json")
 
@@ -132,194 +133,160 @@ const sendRecruit = async (castle, unit, amount) => {
 //Every outcome of our command is logged by this plugin
 quietResultKeys.add(RECRUIT_COMMAND)
 
-let joinedCastle
-const enterCastle = async castle => {
-    if (joinedCastle?.kingdomID == castle.kingdomID && joinedCastle?.areaID == castle.areaID)
-        return true
-    try {
-        const joined = await ClientCommands.joinCastle(castle.areaID, castle.kingdomID)()
-        if (joined.result != 0)
-            throw err[joined.result] ?? joined.result
-        joinedCastle = castle
-        return true
-    }
-    catch (e) {
-        console.warn("recruitJoinCastleFailed", "kingdom", castle.kingdomID, "area", castle.areaID, e)
-        return false
-    }
-}
-
-const getMainCastle = async () => {
-    const resourceCastleList = await getResourceCastleList()
-    const areaID = Number(resourceCastleList.castles.find(e => e.kingdomID == KingdomID.greatEmpire)
-        .areaInfo.find(e => e.type == AreaType.mainCastle)
-        .extraData[0])
-    return { kingdomID: KingdomID.greatEmpire, areaID }
-}
-
 let cycleRunning = false
 const runCycle = async () => {
     if (cycleRunning)
         return
     cycleRunning = true
 
-    //A successful join answers with a bogus "jaa TIMED_OUT" line, hide it
-    //while we hop between castles, but only if nobody else asked for that.
-    const hideJoinNoise = !quietTimeoutKeys.has("jaa")
-    if (hideJoinNoise)
-        quietTimeoutKeys.add("jaa")
-
     try {
-        const { troop, packageSize } = getOptions()
-
-        const chain = getLevelChain(troop.unitType)
-        if (chain.length == 0) {
-            console.warn("recruitUnitTypeUnknown", troop.unitType)
-            return
-        }
-
-        const dcl = await ClientCommands.getDetailedCastleList()
-
-        const castles = []
-        dcl.castles.forEach(kingdom => {
-            if (!RECRUIT_KINGDOMS.includes(kingdom.kingdomID))
-                return
-
-            kingdom.areaInfo.forEach(area => {
-                if (!area.hasBarracks)
-                    return
-                castles.push({ kingdomID: kingdom.kingdomID, areaID: area.areaID })
-            })
-        })
-
-        if (castles.length == 0) {
-            console.warn("recruitNoBarracksFound")
-            return
-        }
-
-        //Coins are shared and kept up to date from "gcu", everything else we
-        //let the server decide. Unknown balance -> ask for the full amount.
-        let coins = Number.isFinite(playerInfo.coin) && playerInfo.coin > 0 ?
-            playerInfo.coin : undefined
-
-        const capByCoins = (unit, amount) => coins == undefined ? amount :
-            Math.min(amount, Math.floor(coins / (unit.costCoins || 1)))
-
-        const spendCoins = (unit, amount) => {
-            if (coins != undefined)
-                coins -= (unit.costCoins || 1) * amount
-        }
-
-        for (const castle of castles) {
-            const castleKey = `${castle.kingdomID}_${castle.areaID}`
-
-            //The server checks the barracks of the castle we are in, not the
-            //one in AID, so enter the castle first like the client does.
-            if (!await enterCastle(castle))
-                continue
-
-            let recruitedUnit
-            let packages = 0
-            let recruitedHere = 0
-
-            //Highest level first, step down while the level is unavailable.
-            for (let i = chain.length - 1; i >= 0; i--) {
-                const unit = chain[i]
-
-                const amount = capByCoins(unit, packageSize)
-                if (amount <= 0) {
-                    console.warn("recruitNotEnoughCoins", troop.name,
-                        `level ${unit.level}`, "coins", coins, "cost", unit.costCoins)
-                    break
-                }
-
-                let result
-                try {
-                    result = await sendRecruit(castle, unit, amount)
-                }
-                catch (e) {
-                    console.warn("recruitNoResponse", troop.name, "kingdom", castle.kingdomID, "area", castle.areaID)
-                    break
-                }
-
-                if (result == 0) {
-                    spendCoins(unit, amount)
-                    recruitedUnit = unit
-                    packages++
-                    recruitedHere += amount
-                    break
-                }
-
-                if (isLevelLockedError(result)) {
-                    //Even the lowest level needs a building this castle lacks
-                    if (i == 0 && errorIs(result, "MISSING_REQUIRED_BUILDING") &&
-                        !reportedMissingBuilding.has(castleKey)) {
-                        reportedMissingBuilding.add(castleKey)
-                        console.warn("recruitMissingBuilding", troop.name,
-                            "kingdom", castle.kingdomID, "area", castle.areaID,
-                            "needs Barracks level", unit.buildingLevel)
-                    }
-                    continue
-                }
-
-                //Full queue is the normal case, anything else is worth a look
-                if (!isQueueFullError(result))
-                    console.warn("recruitRejected", troop.name, `level ${unit.level}`,
-                        err[result] ?? result, "kingdom", castle.kingdomID, "area", castle.areaID)
-                break
-            }
-
-            //The first package found the level, fill the remaining free slots with it
-            let stopReason
-            while (recruitedUnit && packages < MAX_PACKAGES_PER_CASTLE) {
-                const amount = capByCoins(recruitedUnit, packageSize)
-                if (amount <= 0) {
-                    stopReason = "NOT_ENOUGH_COINS"
-                    break
-                }
-                let result
-                try {
-                    result = await sendRecruit(castle, recruitedUnit, amount)
-                }
-                catch (e) {
-                    stopReason = "NO_ANSWER"
-                    break
-                }
-                if (result != 0) {
-                    stopReason = err[result] ?? result
-                    break
-                }
-                spendCoins(recruitedUnit, amount)
-                packages++
-                recruitedHere += amount
-            }
-
-            if (recruitedUnit) {
-                const queueFull = stopReason == "NO_FREE_CONSTRUCTION_SLOT"
-                console[queueFull ? "log" : "warn"]("recruited", recruitedHere, troop.name,
-                    `level ${recruitedUnit.level}`, "in", packages, "slots",
-                    "kingdom", castle.kingdomID, "area", castle.areaID,
-                    ...(queueFull ? [] : [`(stopped: ${stopReason ?? "slot limit"})`]))
-            }
-        }
+        await visitCastles(recruitInAllCastles)
     }
     catch (e) {
         console.warn(e)
     }
     finally {
-        //Leave the bot in the main castle, where it was before the cycle
-        try {
-            if (joinedCastle)
-                await enterCastle(await getMainCastle())
-        } catch (e) {
-            console.warn("recruitReturnToMainCastleFailed", e)
-        }
-        joinedCastle = undefined
-
-        if (hideJoinNoise)
-            quietTimeoutKeys.delete("jaa")
-
         cycleRunning = false
+    }
+}
+
+const recruitInAllCastles = async enter => {
+    const { troop, packageSize } = getOptions()
+
+    const chain = getLevelChain(troop.unitType)
+    if (chain.length == 0) {
+        console.warn("recruitUnitTypeUnknown", troop.unitType)
+        return
+    }
+
+    const dcl = await ClientCommands.getDetailedCastleList()
+
+    const castles = []
+    dcl.castles.forEach(kingdom => {
+        if (!RECRUIT_KINGDOMS.includes(kingdom.kingdomID))
+            return
+
+        kingdom.areaInfo.forEach(area => {
+            if (!area.hasBarracks)
+                return
+            castles.push({ kingdomID: kingdom.kingdomID, areaID: area.areaID })
+        })
+    })
+
+    if (castles.length == 0) {
+        console.warn("recruitNoBarracksFound")
+        return
+    }
+
+    //Coins are shared and kept up to date from "gcu", everything else we
+    //let the server decide. Unknown balance -> ask for the full amount.
+    let coins = Number.isFinite(playerInfo.coin) && playerInfo.coin > 0 ?
+        playerInfo.coin : undefined
+
+    const capByCoins = (unit, amount) => coins == undefined ? amount :
+        Math.min(amount, Math.floor(coins / (unit.costCoins || 1)))
+
+    const spendCoins = (unit, amount) => {
+        if (coins != undefined)
+            coins -= (unit.costCoins || 1) * amount
+    }
+
+    for (const castle of castles) {
+        const castleKey = `${castle.kingdomID}_${castle.areaID}`
+
+        //The server checks the barracks of the castle we are in, not the
+        //one in AID, so enter the castle first like the client does.
+        try {
+            await enter(castle)
+        }
+        catch (e) {
+            console.warn("recruitJoinCastleFailed", "kingdom", castle.kingdomID, "area", castle.areaID, e.message)
+            continue
+        }
+
+        let recruitedUnit
+        let packages = 0
+        let recruitedHere = 0
+
+        //Highest level first, step down while the level is unavailable.
+        for (let i = chain.length - 1; i >= 0; i--) {
+            const unit = chain[i]
+
+            const amount = capByCoins(unit, packageSize)
+            if (amount <= 0) {
+                console.warn("recruitNotEnoughCoins", troop.name,
+                    `level ${unit.level}`, "coins", coins, "cost", unit.costCoins)
+                break
+            }
+
+            let result
+            try {
+                result = await sendRecruit(castle, unit, amount)
+            }
+            catch (e) {
+                console.warn("recruitNoResponse", troop.name, "kingdom", castle.kingdomID, "area", castle.areaID)
+                break
+            }
+
+            if (result == 0) {
+                spendCoins(unit, amount)
+                recruitedUnit = unit
+                packages++
+                recruitedHere += amount
+                break
+            }
+
+            if (isLevelLockedError(result)) {
+                //Even the lowest level needs a building this castle lacks
+                if (i == 0 && errorIs(result, "MISSING_REQUIRED_BUILDING") &&
+                    !reportedMissingBuilding.has(castleKey)) {
+                    reportedMissingBuilding.add(castleKey)
+                    console.warn("recruitMissingBuilding", troop.name,
+                        "kingdom", castle.kingdomID, "area", castle.areaID,
+                        "needs Barracks level", unit.buildingLevel)
+                }
+                continue
+            }
+
+            //Full queue is the normal case, anything else is worth a look
+            if (!isQueueFullError(result))
+                console.warn("recruitRejected", troop.name, `level ${unit.level}`,
+                    err[result] ?? result, "kingdom", castle.kingdomID, "area", castle.areaID)
+            break
+        }
+
+        //The first package found the level, fill the remaining free slots with it
+        let stopReason
+        while (recruitedUnit && packages < MAX_PACKAGES_PER_CASTLE) {
+            const amount = capByCoins(recruitedUnit, packageSize)
+            if (amount <= 0) {
+                stopReason = "NOT_ENOUGH_COINS"
+                break
+            }
+            let result
+            try {
+                result = await sendRecruit(castle, recruitedUnit, amount)
+            }
+            catch (e) {
+                stopReason = "NO_ANSWER"
+                break
+            }
+            if (result != 0) {
+                stopReason = err[result] ?? result
+                break
+            }
+            spendCoins(recruitedUnit, amount)
+            packages++
+            recruitedHere += amount
+        }
+
+        if (recruitedUnit) {
+            const queueFull = stopReason == "NO_FREE_CONSTRUCTION_SLOT"
+            console[queueFull ? "log" : "warn"]("recruited", recruitedHere, troop.name,
+                `level ${recruitedUnit.level}`, "in", packages, "slots",
+                "kingdom", castle.kingdomID, "area", castle.areaID,
+                ...(queueFull ? [] : [`(stopped: ${stopReason ?? "slot limit"})`]))
+        }
     }
 }
 

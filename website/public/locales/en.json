@@ -227,5 +227,10 @@
 	"incomingClicks" : " clicks",
 	"recruit": "Auto Recruit",
 	"recruitTroopType": "Troop type",
-	"recruitPackageSize": "Troops per slot"
+	"recruitPackageSize": "Troops per slot",
+	"ship Upgrades": "Ship (Cargo) upgrades",
+	"auto Upgrade Ships": "Auto upgrade ships",
+	"useTimeSkipsForShips": "Use time skips for ships (never rubies)",
+	"shipsMaxLevel": "Upgrade ships up to level",
+	"shipsKeepAquamarine": "Aquamarine to keep"
 }

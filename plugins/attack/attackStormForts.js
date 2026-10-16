@@ -28,6 +28,8 @@ if (require('node:worker_threads').isMainThread) {
             { type: "Label", key: "ship Upgrades", md: 2 },
             { type: "Checkbox", key: "auto Upgrade Ships", default: false },
             { type: "Checkbox", key: "useTimeSkipsForShips", default: false },
+            { type: "Text", key: "shipsMaxLevel", default: "10" },
+            { type: "Text", key: "shipsKeepAquamarine", default: "0" },
         ]
 
     }
@@ -105,6 +107,9 @@ if (pluginOptions.upgradeStormForts) {
         console.warn(e)
     }
 }
+
+//Cargo ("ship") upgrades; reads "auto Upgrade Ships" on every check
+require("./stormCargoUpgrade.js")(pluginOptions)
 
 const kingdomID = KingdomID.stormIslands
 const type = AreaType.stormTower
