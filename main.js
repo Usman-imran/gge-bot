@@ -147,6 +147,18 @@ const getUser = uuid => {
   })
 }
 
+//The game ignores the case of account names: two saved entries for the same
+//game account on one server log each other out in a loop.
+const sameGameAccount = (a, b) =>
+  String(a.name).trim().toLowerCase() == String(b.name).trim().toLowerCase() &&
+  Number(a.server) == Number(b.server)
+
+//Another saved entry (under any web login) for the same game account.
+//runningOnly: only entries that are set to run or have a live bot.
+const findDuplicate = (user, { runningOnly = false } = {}) =>
+  getUser().find(other => other.id != user.id && sameGameAccount(other, user) &&
+    (!runningOnly || other.state == 1 || botMap.get(other.id) != undefined))
+
 async function start() {
   try {
     await fs.access('./ggeConfig.json')
@@ -667,6 +679,7 @@ async function start() {
   }
 
   const users = getUser()
+  const started = []
   for (let i = 0; i < users.length; i++) {
     let user = users[i]
     let keyRemoved = false
@@ -682,8 +695,16 @@ async function start() {
       user = changeUser(user.uuid, user)
     }
 
-    if (user.state != 0)
+    if (user.state != 0) {
+      //Saved duplicates from before this check: only the first one runs
+      const clash = started.find(other => sameGameAccount(other, user))
+      if (clash) {
+        console.warn(`[${user.name}] not started: the same game account already runs as "${clash.name}" (id ${clash.id})`)
+        continue
+      }
+      started.push(user)
       createBot(user.uuid, user)
+    }
   }
 
   const wss = new WebSocketServer({ noServer: true })
@@ -763,7 +784,12 @@ async function start() {
           break
         }
         case ActionType.AddUser: {
-          addUser(uuid, new User(obj))
+          const user = new User(obj)
+          if (findDuplicate(user)) {
+            ws.send(JSON.stringify([ErrorType.Generic, ActionType.AddUser, { reason: "duplicateGameAccount", name: user.name }]))
+            break
+          }
+          addUser(uuid, user)
           refreshUsers()
           break
         }
@@ -786,6 +812,15 @@ async function start() {
           break
         }
         case ActionType.SetUser: {
+          //Starting while another entry of the same game account runs
+          if (Number(obj?.state) == 1) {
+            const stored = getSpecificUser(uuid, new User(obj))
+            if (findDuplicate(stored, { runningOnly: true })) {
+              ws.send(JSON.stringify([ErrorType.Generic, ActionType.SetUser, { reason: "duplicateGameAccountRunning", name: stored.name }]))
+              refreshUsers() //puts the Start button back
+              break
+            }
+          }
           let oldUser = getSpecificUser(uuid, new User(obj))
           let user = changeUser(uuid, new User(obj))
           if (user.state == 0) {

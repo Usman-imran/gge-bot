@@ -144,6 +144,19 @@ function App({ setLanguage, languageCode, __ }) {
           usersStatus[obj.id] = obj
           setUsersStatus(structuredClone(usersStatus))
           break
+        case ActionType.AddUser:
+        case ActionType.SetUser:
+          if (err === ErrorType.Success)
+            break
+          //A refused save is answered, no "no answer" warning afterwards
+          clearTimeout(pendingSave.current)
+          pendingSave.current = undefined
+          notify(obj?.reason === "duplicateGameAccount" ?
+            __("duplicateGameAccount", `"${obj.name}" is already added on this server (maybe under another login). Remove the other one first.`) :
+            obj?.reason === "duplicateGameAccountRunning" ?
+              __("duplicateGameAccountRunning", `"${obj.name}" is already running on this server under another entry. Stop that one first.`) :
+              __("saveFailed", "The bot server refused the change."), "error")
+          break
         case ActionType.RemoveUser:
           if (err !== ErrorType.Success)
             notify(__("removeFailed", "Some accounts could not be removed."), "error")
