@@ -77,8 +77,10 @@ export default function TopBar({ connected, channelInfo, setLanguage, languageCo
                         sx={{ '& .MuiChip-label': { display: { xs: "none", sm: "block" } }, '& .MuiChip-icon': { mx: { xs: "6px", sm: "4px 0 0" } } }} />
                 </Tooltip>
                 <Box sx={{ flexGrow: 1 }} />
-                <Button color="inherit" size="small" onClick={() => openDiscordLink(channelInfo)}
-                    sx={{ whiteSpace: "nowrap", minWidth: 0 }}>{__("linkDiscord")}</Button>
+                {/* The server only sends the Discord app id when Discord is set up */}
+                {channelInfo?.[0] ?
+                    <Button color="inherit" size="small" onClick={() => openDiscordLink(channelInfo)}
+                        sx={{ whiteSpace: "nowrap", minWidth: 0 }}>{__("linkDiscord")}</Button> : undefined}
                 <Language setLanguage={setLanguage} languageCode={languageCode} />
                 <Tooltip title={__("logout", "Log out")}>
                     <IconButton color="inherit" onClick={logout} aria-label={__("logout", "Log out")}>
