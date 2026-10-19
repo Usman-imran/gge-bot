@@ -45,12 +45,27 @@ const STATUS_FIELDS = [
 const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
 const fullNumber = new Intl.NumberFormat()
 
+//Attacks counted by the game against the attack limit, e.g. "⚔️ 12/50"
+function AttackChip({ status, __ }) {
+    const attacks = Number(status.attacks), limit = Number(status.attackLimit)
+    const hasLimit = Number.isFinite(limit) && limit > 0
+    const reached = hasLimit && attacks >= limit
+    return <Tooltip title={hasLimit ?
+        `${__("attacksCounted", "Attacks counted by the game")}: ${attacks} / ${limit}${reached ? ` - ${__("attackLimitReached", "limit reached, attacks paused")}` : ""}` :
+        `${__("attacksCounted", "Attacks counted by the game")}: ${attacks}`}>
+        <Chip size="small" variant="outlined" color={reached ? "warning" : "default"}
+            label={`⚔️ ${attacks}${hasLimit ? `/${limit}` : ""}`} />
+    </Tooltip>
+}
+
 function StatusChips({ status, __ }) {
     const shown = STATUS_FIELDS.filter(field => status[field.key] !== undefined && status[field.key] !== null)
-    if (shown.length === 0)
+    const hasAttacks = Number.isFinite(Number(status.attacks)) && status.attacks !== null
+    if (shown.length === 0 && !hasAttacks)
         return <Typography variant="body2" color="text.secondary">-</Typography>
 
     return <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+        {hasAttacks ? <AttackChip status={status} __={__} /> : undefined}
         {shown.map(field => {
             const value = Number(status[field.key])
             const label = __(field.langKey ?? field.key, field.label)

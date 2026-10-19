@@ -485,6 +485,25 @@ xtHandler.on("gcu", obj => {
     parentPort.postMessage([ActionType.StatusUser, status])
 })
 
+//Attack counter kept by the game server (AC), pushed after login and after attacks.
+//The limit is "Attack limit" from the attack settings, or the game's own threshold (ACTH).
+let attackCounter = undefined
+const sendAttackCounter = () => {
+    if (!attackCounter)
+        return
+    const ownLimit = Number(botConfig.plugins?.attack?.attackLimit)
+    Object.assign(status, {
+        attacks: attackCounter.AC,
+        attackLimit: ownLimit > 0 ? ownLimit : attackCounter.ACTH
+    })
+    parentPort.postMessage([ActionType.StatusUser, status])
+}
+xtHandler.on("gai", obj => {
+    attackCounter = obj
+    sendAttackCounter()
+})
+events.on("configModified", sendAttackCounter)
+
 events.on("eventStart", async eventInfo => {
     if (eventInfo.EID != 117)
         return

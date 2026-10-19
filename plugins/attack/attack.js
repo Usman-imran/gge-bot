@@ -285,11 +285,14 @@ let attackThreshold = undefined
 if([,""].includes(pluginOptions.attackLimit))
     pluginOptions.attackLimit = undefined
     
+let announced = false
 xtHandler.on("gai", obj => {
     attackCount = obj.AC
     attackThreshold = obj.ACTH
+    //Count went down again (game reset): announce the next time the limit is hit
+    if (attackCount < Number(pluginOptions.attackLimit ?? attackThreshold))
+        announced = false
 })
-let announced = false
 const waitToAttack = callback => new Promise((resolve, reject) => {
     if(!botConfig.externalEvent && attackCount >= Number(pluginOptions.attackLimit ?? attackThreshold)) {
         if(!announced) {
