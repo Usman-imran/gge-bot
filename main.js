@@ -326,6 +326,13 @@ async function start() {
 
   const USERNAME_MIN = 3, USERNAME_MAX = 32, PASSWORD_MIN = 6
 
+  //"signupToken" in ggeConfig.json is the invite code: empty = anyone can sign up
+  const inviteCode = String(ggeConfig.signupToken ?? "").trim()
+  const isInviteCode = given => {
+    const a = Buffer.from(String(given ?? "").trim()), b = Buffer.from(inviteCode)
+    return a.length == b.length && crypto.timingSafeEqual(a, b)
+  }
+
   app.post('/api', bodyParser.json(), async (req, res) => {
     const json = req.body ?? {}
     const reply = (id, obj) => res.json({ id, ...obj })
@@ -356,7 +363,13 @@ async function start() {
         return reply(0, { r: 0, uuid: row.uuid })
       }
 
+      if (json.id == 2) //Sign up page asks whether to show the invite code field
+        return reply(2, { r: 0, inviteRequired: inviteCode != "" })
+
       if (json.id == 1) { //Sign up
+        //token: field name of the old sign up page, still in browser caches
+        if (inviteCode && !isInviteCode(json.inviteCode ?? json.token))
+          return fail(1, 'Wrong invite code. Ask the bot owner for it.')
         if (username.length < USERNAME_MIN || username.length > USERNAME_MAX)
           return fail(1, `Username must be ${USERNAME_MIN} to ${USERNAME_MAX} characters.`)
         if (password.length < PASSWORD_MIN)
