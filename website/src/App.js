@@ -1,12 +1,13 @@
 import ReconnectingWebSocket from "reconnecting-websocket"
 import { ThemeProvider, createTheme } from '@mui/material/styles'
-import { CircularProgress } from '@mui/material'
+import { CircularProgress, Box } from '@mui/material'
 import { useCookies } from 'react-cookie'
 import * as React from 'react'
 import './App.css'
 import { ErrorType, GetErrorTypeName, ActionType, User } from "./types.js"
 import GGEUserTable from './modules/GGEUsersTable'
 import TopBar from './modules/TopBar'
+import AdminPanel from './modules/AdminPanel'
 import { NotifyProvider, useNotify } from './modules/notify'
 import settings from './settings.json'
 
@@ -89,6 +90,8 @@ function App({ setLanguage, languageCode, __ }) {
   const [plugins, setPlugins] = React.useState([])
   const [channelInfo, setChannelInfo] = React.useState([])
   const [connected, setConnected] = React.useState(false)
+  //Only sent by the server to admins, undefined hides the admin panel
+  const [adminAccounts, setAdminAccounts] = React.useState(undefined)
   const notify = useNotify()
 
   //The server has no "saved" answer: after AddUser/SetUser it sends the new
@@ -165,6 +168,18 @@ function App({ setLanguage, languageCode, __ }) {
           if (err !== ErrorType.Success)
             notify(__("logsNotRunning", "This account is not running, so there are no logs yet."), "info")
           break
+        case ActionType.AdminGetUsers:
+          setAdminAccounts(err === ErrorType.Success && Array.isArray(obj) ? obj : undefined)
+          break
+        case ActionType.AdminSetState:
+          if (err === ErrorType.Success)
+            break
+          notify(obj?.reason === "duplicateGameAccountRunning" ?
+            __("duplicateGameAccountRunning", `"${obj.name}" is already running on this server under another entry. Stop that one first.`) :
+            obj?.reason === "notFound" ?
+              __("adminNotFound", "That account no longer exists.") :
+              __("saveFailed", "The bot server refused the change."), "error")
+          break
         default:
           return
       }
@@ -183,6 +198,10 @@ function App({ setLanguage, languageCode, __ }) {
         languageCode={languageCode}
         __={__} />
       <GGEUserTable ws={ws} plugins={plugins} rows={users} usersStatus={usersStatus} channelInfo={channelInfo} expectSave={expectSave} __={__} />
+      {adminAccounts ?
+        <Box sx={{ px: { xs: 1, sm: 2 }, pb: 2 }}>
+          <AdminPanel ws={ws} accounts={adminAccounts} __={__} />
+        </Box> : undefined}
     </div>
   )
 }

@@ -8,7 +8,10 @@ const ActionType = Object.freeze({
     Reset: 6,
     StatusUser: 7,
     Unknown: 8,
-    GetChannels : 18
+    GetChannels : 18,
+    AdminGetUsers: 20,
+    AdminSetState: 21,
+    AdminRemoveUsers: 22
 })
 const GetActionTypeName = id => 
     Object.keys(ActionType).find(key => ActionType[key] === id) ?? 

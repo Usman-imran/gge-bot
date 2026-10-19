@@ -44,6 +44,7 @@ const ggeConfigExample = `{
     "privateKey" : "",
     "cert" : "",
     "signupToken" : "",
+    "admins" : [],
     "discordToken" : "",
     "discordClientId" : "",
     "discordClientSecret" : "",
@@ -101,6 +102,10 @@ const addUser = (uuid, user) => {
 const getSpecificUser = (uuid, user) => {
   const row = userDatabase.prepare('Select id, name, plugins, pass, state, externalEvent, server From SubUsers WHERE uuid=? AND id=?')
     .get(uuid, user.id)
+
+  //Removed meanwhile (e.g. while the bot waited to restart)
+  if (!row)
+    return undefined
 
   row.plugins = JSON.parse(row.plugins ?? '{}')
 
@@ -613,12 +618,13 @@ async function start() {
     const onTerminate = () => {
       if (botMap.get(user.id) == worker) {
         botMap.set(user.id, undefined)
-        if (getSpecificUser(uuid, user).state == true) {
+        if (getSpecificUser(uuid, user)?.state == true) {
           console.debug(`[${user.name}] ${i18n.__("restartDelay")}`)
           setTimeout(() => {
              // Re-fetch user state to ensure they didn't turn it off during the 10s wait
-             user = getSpecificUser(uuid, user)
-             if (user && user.state == true) {
+             const current = getSpecificUser(uuid, user)
+             if (current && current.state == true) {
+                 user = current
                  createBot(uuid, user, worker.messageBuffer, worker.messageBufferCount)
              } else {
                  console.debug(`[${user.name}] ${i18n.__("restartCanceledReasonBotStoppedByUser")}`)
@@ -633,9 +639,10 @@ async function start() {
         case ActionType.KillBot:
           userDatabase.prepare('UPDATE SubUsers SET state = ? WHERE id = ?').run(0, user.id)
           removeBot(user.id)
-          
-          loggedInUsers[uuid]?.forEach(({ws}) => 
+
+          loggedInUsers[uuid]?.forEach(({ws}) =>
               ws.send(JSON.stringify([ErrorType.Success, ActionType.GetUsers, [getUser(uuid), plugins.filter(e => !e.hidden)]])))
+          broadcastAdmins()
           break
         case ActionType.GetLogs:
             // console.log("logged something")
@@ -690,6 +697,41 @@ async function start() {
     botMap.delete(id)
     worker.terminate()
   }
+
+  //"admins" in ggeConfig.json: web logins that see and control every game account
+  const adminNames = (Array.isArray(ggeConfig.admins) ? ggeConfig.admins : [])
+    .map(name => String(name).trim().toLowerCase())
+  const isAdmin = uuid => {
+    if (adminNames.length == 0 || !uuid)
+      return false
+    const row = userDatabase.prepare('SELECT username FROM Users WHERE uuid = ?').get(uuid)
+    return !!row && adminNames.includes(String(row.username).trim().toLowerCase())
+  }
+  //Every game account with its owner, without passwords
+  const adminAccounts = () => {
+    const owners = new Map(userDatabase.prepare('SELECT uuid, username FROM Users').all()
+      .map(row => [row.uuid, row.username]))
+    return getUser().map(user => ({
+      id: user.id,
+      name: user.name,
+      server: user.server,
+      serverName: instances.find(e => Number(e.gameID) == user.server)?.gameServer,
+      owner: owners.get(user.uuid) ?? "?",
+      state: user.state,
+      running: botMap.get(user.id) != undefined
+    }))
+  }
+  const sendAdminList = ws =>
+    ws.send(JSON.stringify([ErrorType.Success, ActionType.AdminGetUsers, adminAccounts()]))
+  function broadcastAdmins() {
+    for (const [uuid, sockets] of Object.entries(loggedInUsers))
+      if (sockets && isAdmin(uuid))
+        sockets.forEach(({ ws }) => sendAdminList(ws))
+  }
+  //The owner's dashboard shows the change too
+  const refreshOwner = uuid =>
+    loggedInUsers[uuid]?.forEach(({ ws }) =>
+      ws.send(JSON.stringify([ErrorType.Success, ActionType.GetUsers, [getUser(uuid), plugins.filter(e => !e.hidden)]])))
 
   const users = getUser()
   const started = []
@@ -748,6 +790,8 @@ async function start() {
     loggedInUsers[uuid].push({ ws })
 
     refreshUsers()
+    if (isAdmin(uuid))
+      sendAdminList(ws)
 
     let users = getUser(uuid)
     users.forEach(user => {
@@ -804,6 +848,7 @@ async function start() {
           }
           addUser(uuid, user)
           refreshUsers()
+          broadcastAdmins()
           break
         }
         case ActionType.RemoveUser: {
@@ -811,6 +856,9 @@ async function start() {
           for (let i = 0; i < obj.length; i++) {
             const user = obj[i]
             try {
+              //Stop it first, a bot without its saved entry can't be stopped anymore
+              if (getSpecificUser(uuid, user) && botMap.get(Number(user.id)) != undefined)
+                removeBot(Number(user.id))
               removeUser(uuid, user)
             }
             catch (e) {
@@ -822,6 +870,7 @@ async function start() {
             ws.send(JSON.stringify([ErrorType.Generic, ActionType.RemoveUser, {}]))
           }
           refreshUsers()
+          broadcastAdmins()
           break
         }
         case ActionType.SetUser: {
@@ -882,6 +931,62 @@ async function start() {
           }
           loggedInUsers[uuid]?.forEach(({ ws }) => 
             ws.send(JSON.stringify([ErrorType.Success, ActionType.GetUsers, [getUser(uuid), plugins.filter(e => !e.hidden)]])))
+          broadcastAdmins()
+          break
+        }
+        case ActionType.AdminGetUsers: {
+          if (!isAdmin(uuid))
+            return ws.send(JSON.stringify([ErrorType.Unauthenticated, ActionType.AdminGetUsers, {}]))
+          sendAdminList(ws)
+          break
+        }
+        case ActionType.AdminSetState: {
+          if (!isAdmin(uuid))
+            return ws.send(JSON.stringify([ErrorType.Unauthenticated, ActionType.AdminSetState, {}]))
+          const target = getUser().find(user => user.id == Number(obj?.id))
+          if (!target) {
+            ws.send(JSON.stringify([ErrorType.Generic, ActionType.AdminSetState, { reason: "notFound" }]))
+            sendAdminList(ws)
+            break
+          }
+          const state = Number(obj.state) == 1 ? 1 : 0
+          if (state == 1 && findDuplicate(target, { runningOnly: true })) {
+            ws.send(JSON.stringify([ErrorType.Generic, ActionType.AdminSetState, { reason: "duplicateGameAccountRunning", name: target.name }]))
+            sendAdminList(ws)
+            break
+          }
+          userDatabase.prepare('UPDATE SubUsers SET state = ? WHERE id = ?').run(state, target.id)
+          if (state == 0) {
+            if (botMap.get(target.id) != undefined)
+              removeBot(target.id)
+          }
+          else if (botMap.get(target.id) == undefined) {
+            //Logging in takes a while, the list is sent again once it runs
+            createBot(target.uuid, getSpecificUser(target.uuid, target))
+              .catch(e => console.warn(e))
+              .finally(broadcastAdmins)
+          }
+          console.info(`[admin] ${state ? "started" : "stopped"} "${target.name}" (id ${target.id})`)
+          refreshOwner(target.uuid)
+          broadcastAdmins()
+          break
+        }
+        case ActionType.AdminRemoveUsers: {
+          if (!isAdmin(uuid))
+            return ws.send(JSON.stringify([ErrorType.Unauthenticated, ActionType.AdminRemoveUsers, {}]))
+          const owners = new Set()
+          for (const id of Array.isArray(obj?.ids) ? obj.ids : []) {
+            const target = getUser().find(user => user.id == Number(id))
+            if (!target)
+              continue
+            if (botMap.get(target.id) != undefined)
+              removeBot(target.id)
+            userDatabase.prepare('DELETE FROM SubUsers WHERE id = ?').run(target.id)
+            console.info(`[admin] removed "${target.name}" (id ${target.id})`)
+            owners.add(target.uuid)
+          }
+          owners.forEach(refreshOwner)
+          broadcastAdmins()
           break
         }
         case ActionType.GetLogs: {
