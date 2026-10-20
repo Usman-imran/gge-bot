@@ -47,25 +47,65 @@ async function barronHit(type, kingdomID, options) {
      * @type {Array<{ sourceArea: import("../../protocols.js").Types.GAAAreaInfo, sortedAreaInfo: Array<import("../../protocols.js").Types.GAAAreaInfo> }>}
      */
     let sortedAreaInfo = []
+    /**
+     * Barons our own attacks are on the way to: { x, y, until (arrival time) }.
+     * Only own movements count, and an entry ends at arrival at the latest,
+     * so a missed "cat" can't block a baron for good.
+     */
     const movements = []
     const getDistance = (a, b) =>
         Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2)
+    const isUnderAttack = target => {
+        const now = Date.now()
+        for (let i = movements.length - 1; i >= 0; i--)
+            if (movements[i].until <= now)
+                movements.splice(i, 1)
+        return movements.some(e => e.x == target.x && e.y == target.y)
+    }
+    const markUnderAttack = (target, secondsLeft) => {
+        if (isUnderAttack(target))
+            return
+        movements.push({ x: target.x, y: target.y, until: Date.now() + (Math.max(0, secondsLeft) + 5) * 1000 })
+    }
+    const freeTarget = target => {
+        const index = movements.findIndex(e => e.x == target.x && e.y == target.y)
+        if (index != -1)
+            movements.splice(index, 1)
+    }
+    /** All known barons by "x_y", filled once at start below. */
+    const uniqueTargets = new Map()
+    //A baron gets a new cooldown when hit (by us or anyone else): read it again
+    //from the map, the start-up data would make it look free.
+    const refreshTarget = async target => {
+        const known = uniqueTargets.get(`${target.x}_${target.y}`)
+        if (!known)
+            return undefined
+        try {
+            const gaa = await ClientCommands.getAreaInfo(kingdomID, known.x, known.y, known.x, known.y)()
+            const fresh = gaa?.areaInfo?.find(e => e.x == known.x && e.y == known.y && e.type == known.type)
+            if (fresh)
+                Object.assign(known, fresh)
+        }
+        catch (e) {
+            console.debug(e)
+        }
+        return known
+    }
 
     xtHandler.on("gam", obj => {
-        const movementsGAA = Types.GetAllMovements(obj)
-        movementsGAA?.movements.forEach(movement => {
-            if (kingdomID != movement.movementData.kingdomID)
+        Array.from(obj?.M ?? []).forEach(raw => {
+            const movement = raw?.M
+            //Other players' attacks (e.g. alliance members) are not ours to track
+            if (movement == undefined || movement.OID != playerInfo.playerID)
+                return
+            if (kingdomID != movement.KID)
                 return
 
-            const targetAttack = movement.movementData.targetAttack
-
+            const targetAttack = new Types.GAAAreaInfo(movement.TA)
             if (type != targetAttack.type)
                 return
 
-            if (movements.find(e => e.x == targetAttack.x && e.y == targetAttack.y))
-                return
-
-            movements.push(targetAttack)
+            markUnderAttack(targetAttack, movement.TT - movement.PT)
         })
     })
     let skipTarget = async (AI) => {
@@ -102,14 +142,13 @@ async function barronHit(type, kingdomID, options) {
             type != sourceAttack.type)
             return
 
-        if(options.useTimeSkips)
-            skipTarget(sourceAttack)
-
-        let index = movements.findIndex(e => e.x == sourceAttack.x && e.y == sourceAttack.y)
-        if (index == -1)
-            return
-
-        movements.splice(index, 1)
+        //The hit baron now has a cooldown: read it before it counts as free
+        //again (and skip the cooldown when allowed)
+        refreshTarget(sourceAttack).then(target => {
+            freeTarget(sourceAttack)
+            if (target && options.useTimeSkips)
+                skipTarget(target).catch(e => console.debug(e))
+        })
     })
     // Main castle first, outposts only when the user opted into attacking from them
     const sourceCastleAreas = (await getResourceCastleList()).castles.find(e => e.kingdomID == kingdomID)
@@ -180,7 +219,7 @@ async function barronHit(type, kingdomID, options) {
                             break
 
                         if (!options.useTimeSkips) {
-                            if (movements.find(e => e.x == areaInfo.x && e.y == areaInfo.y))
+                            if (isUnderAttack(areaInfo))
                                 continue
 
                             if (((areaInfo.timeSinceRequest + areaInfo.extraData[2] * 1000) - timeSinceEpoch) > 0)
@@ -289,8 +328,12 @@ async function barronHit(type, kingdomID, options) {
                         attackInfo.RW.forEach(slot => slot[0] != -1 && (sourceCastle.unitInventory.find(e => e?.unitID == slot[0]).ammount -= slot[1]))
                     })
                     if (!options.useTimeSkips)
-                        movements.push(AI)
+                        markUnderAttack(AI, obj.AAM.M.TT - obj.AAM.M.PT)
                 }
+                //Someone else hit it since we read the map: get its real cooldown,
+                //so the next pick moves on to the next nearest free baron
+                else if (err[result] == "COOLING_DOWN")
+                    await refreshTarget(AI)
 
                 const executionDuration = ((Date.now() - executionStartTime) / 1000).toFixed(2);
                 obj.executionDuration = executionDuration; // Pass it out
@@ -345,8 +388,6 @@ async function barronHit(type, kingdomID, options) {
             }
         }
     }
-    /** @type {Map<string, import("../../protocols.js").Types.GAAAreaInfo>} */
-    const uniqueTargets = new Map()
     for (const sourceArea of sourceCastleAreas) {
         /** @type {import("../../protocols.js").Types.ServerGetAreaInfo} */
         let gaa
@@ -379,10 +420,13 @@ async function barronHit(type, kingdomID, options) {
             let minimumTimeTillHit = Infinity
 
             uniqueTargets.forEach(ai => {
-                if (!movements.find(a => a.x == ai.x && a.y == ai.y))
+                if (!isUnderAttack(ai))
                     minimumTimeTillHit = Math.min(minimumTimeTillHit, (ai.timeSinceRequest + ai.extraData[2] * 1000))
             })
-            let time = (Math.max(0, minimumTimeTillHit - Date.now()))
+            //Every baron under attack: check again when the first attack lands
+            if (minimumTimeTillHit == Infinity && movements.length > 0)
+                minimumTimeTillHit = Math.min(...movements.map(e => e.until))
+            let time = Number.isFinite(minimumTimeTillHit) ? Math.max(0, minimumTimeTillHit - Date.now()) : 1000 * 60
             if (time > 0)
                 console.info("waitingForNextPossibleHit", Math.round(time / 1000), "waitingForNextPossibleHit2")
             await new Promise(r => setTimeout(r, time).unref())
