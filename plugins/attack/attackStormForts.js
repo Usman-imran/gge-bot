@@ -53,7 +53,7 @@ if (require('node:worker_threads').isMainThread) {
 const { getCommanderStats } = require("../../getEquipment.js")
 const { Types, getResourceCastleList, ClientCommands, areaInfoLock, AreaType, KingdomID } = require('../../protocols.js')
 const { waitToAttack, getAttackInfo, assignUnit, getAmountSoldiersFlank } = require("./attack.js")
-const { movementEvents, waitForCommanderAvailable, freeCommander, useCommander } = require("../commander.js")
+const { movementEvents, waitForCommanderAvailable, commanderNumber, parseCommanderWhiteList, freeCommander, useCommander } = require("../commander.js")
 const { sendXT, waitForResult, xtHandler, botConfig, events } = require("../../ggeBot.js")
 const getAreaCached = require('../../getMap.js')
 const err = require("../../err.json")
@@ -199,11 +199,7 @@ events.once("load", async () => {
     })
     //Gotta detect cooling down towers
     const sendHit = async () => {
-        let comList = undefined
-        if (![, ""].includes(pluginOptions.commanderWhiteList)) {
-            const [start, end] = pluginOptions.commanderWhiteList.split("-").map(Number).map(a => a - 1);
-            comList = Array.from({ length: end - start + 1 }, (_, i) => start + i)
-        }
+        const comList = parseCommanderWhiteList(pluginOptions.commanderWhiteList)
 
         const commander = await waitForCommanderAvailable(comList, undefined,
             (a, b) => getCommanderStats(b).relicLootBonus - getCommanderStats(a).relicLootBonus)
@@ -323,7 +319,7 @@ events.once("load", async () => {
             if (attackInfo.result != 0)
                 throw err[attackInfo.result]
 
-            console.info("hittingTargetAttack", 'C', attackInfo.AAM.UM.L.VIS + 1, ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
+            console.info("hittingTargetAttack", 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
             return true
         } catch (e) {
             freeCommander(commander.lordID)

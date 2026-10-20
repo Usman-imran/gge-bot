@@ -26,12 +26,50 @@ function useCommander(LID) {
     return LID
 }
 
+//The game numbers commanders ("Commander 5") by sorting them by ID
+const commanderNumber = lordID => {
+    const index = commanders.map(e => Number(e.ID)).sort((a, b) => a - b).indexOf(Number(lordID))
+    return index == -1 ? undefined : index + 1
+}
+
+//Commander Whitelist text -> game commander numbers.
+//"" = all commanders (undefined), "3", "1-5", "1,3,5" and "1-3, 7" are read.
+//Text that can't be read gives an empty list: no commander is used, so
+//commanders kept for manual play are never sent by mistake.
+const reportedWhiteLists = new Set()
+const parseCommanderWhiteList = text => {
+    text = String(text ?? "").trim()
+    if (text == "" || text == "0")
+        return undefined
+
+    const numbers = []
+    for (const part of text.split(",").map(e => e.trim()).filter(e => e != "")) {
+        const range = part.match(/^(\d+)\s*-\s*(\d+)$/)
+        if (range) {
+            const [start, end] = [Number(range[1]), Number(range[2])].sort((a, b) => a - b)
+            for (let i = start; i <= end; i++)
+                numbers.push(i)
+        }
+        else if (/^\d+$/.test(part))
+            numbers.push(Number(part))
+        else {
+            if (!reportedWhiteLists.has(text)) {
+                reportedWhiteLists.add(text)
+                console.warn(`Commander Whitelist "${text}" can't be read, no commander will be sent. Use e.g. 1-5, 3 or 1,3,5.`)
+            }
+            return []
+        }
+    }
+    return numbers
+}
+
 const waitForCommanderAvailable = async (arr, filterCallback, sortCallback) => {
     if(commanders.length == 0) {
         parseGLI((await waitForResult("gli", 1000 * 10))[0].C)
     }
+    //arr: allowed game commander numbers, see parseCommanderWhiteList
     let usableCommanders = commanders.map(e => new Types.Lord(e))
-        .filter(e => ((!arr || arr.includes(e.lordPosition)) &&
+        .filter(e => ((!arr || arr.includes(commanderNumber(e.lordID))) &&
             !usedCommanders.includes(e.lordID)))
 
     if (sortCallback)
@@ -42,18 +80,21 @@ const waitForCommanderAvailable = async (arr, filterCallback, sortCallback) => {
     let LID = usableCommanders[0]?.lordID
 
     LID ??= await new Promise(resolve => {
+        //Keeps waiting until a commander this caller may use comes back.
+        //Only a taken commander stops the event, so other waiting plugins
+        //still get the ones that are not on this caller's list.
         const checkForCommander = currentEvent => {
-            currentEvent.stopImmediatePropagation()
-            if(usedCommanders.find(e => e == currentEvent.detail)) {
-                debugger
+            if(usedCommanders.find(e => e == currentEvent.detail))
                 return
-            }
-            event.removeEventListener("freedCommander", checkForCommander)
             const com = commanders.find(e => e.ID == currentEvent.detail)
-            if ((!arr || arr.includes(com.VIS))
+            if (!com)
+                return
+            if ((!arr || arr.includes(commanderNumber(com.ID)))
                 && (!filterCallback || filterCallback(new Types.Lord(com)))) {
+                currentEvent.stopImmediatePropagation()
+                event.removeEventListener("freedCommander", checkForCommander)
                 resolve(currentEvent.detail)
-                }
+            }
         }
         event.addEventListener("freedCommander", checkForCommander)
     })
@@ -125,6 +166,8 @@ xtHandler.on("cat", obj => {
 module.exports = {
     movementEvents,
     waitForCommanderAvailable,
+    commanderNumber,
+    parseCommanderWhiteList,
     useCommander,
     freeCommander
 }

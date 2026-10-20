@@ -6,7 +6,7 @@ if (require('node:worker_threads').isMainThread)
 const { getCommanderStats } = require("../../getEquipment")
 const { Types, getResourceCastleList, ClientCommands, AreaType, spendSkip, KingdomID } = require('../../protocols')
 const { waitToAttack, getAttackInfo, assignUnit, getAmountSoldiersFlank, getAmountSoldiersFront, getMaxUnitsInReinforcementWave } = require("./attack.js")
-const { movementEvents, waitForCommanderAvailable, freeCommander, useCommander } = require("../commander")
+const { movementEvents, waitForCommanderAvailable, commanderNumber, parseCommanderWhiteList, freeCommander, useCommander } = require("../commander")
 const { sendXT, waitForResult, xtHandler, botConfig, playerInfo } = require("../../ggeBot.js")
 const getAreaCached = require('../../getMap.js')
 const err = require("../../err.json")
@@ -119,11 +119,7 @@ async function barronHit(type, kingdomID, options) {
             Number(![AreaType.externalKingdom, AreaType.mainCastle].includes(b.type)));
 
     const sendHit = async () => {
-        let comList = undefined
-        if (![, 0, ""].includes(options.commanderWhiteList)) {
-            const [start, end] = options.commanderWhiteList.split("-").map(Number).map(a => a - 1)
-            comList = Array.from({ length: end - start + 1 }, (_, i) => start + i)
-        }
+        const comList = parseCommanderWhiteList(options.commanderWhiteList)
 
         const commander = await waitForCommanderAvailable(comList)
         const hasShieldMadiens = !(((commander.EQ[3] ?? [])[5]?.every(([id, _]) => id == 121 ? false : true)) ?? true)
@@ -310,7 +306,7 @@ async function barronHit(type, kingdomID, options) {
                 console.debug(`${JSON.stringify(attackInfo)}`)
                 throw err[attackInfo.result]
             }
-            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', attackInfo.AAM.UM.L.VIS + 1, ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
+            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
             return true
         } catch (e) {
             freeCommander(commander.lordID)

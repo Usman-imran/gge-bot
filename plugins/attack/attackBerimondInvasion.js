@@ -41,7 +41,7 @@ if (require('node:worker_threads').isMainThread)
 
 const { Types, getResourceCastleList, ClientCommands, AreaType, spendSkip, KingdomID } = require('../../protocols.js')
 const { waitToAttack, getAttackInfo, assignUnit, getTotalAmountToolsFlank, getTotalAmountToolsFront, getAmountSoldiersFlank, getAmountSoldiersFront, getMaxUnitsInReinforcementWave } = require("./attack.js")
-const { movementEvents, waitForCommanderAvailable, freeCommander, useCommander } = require('../commander.js')
+const { movementEvents, waitForCommanderAvailable, commanderNumber, parseCommanderWhiteList, freeCommander, useCommander } = require('../commander.js')
 const { sendXT, waitForResult, xtHandler, events, playerInfo, botConfig } = require('../../ggeBot.js')
 const { getCommanderStats } = require('../../getEquipment.js')
 const units = require('../../items/units.json')
@@ -126,11 +126,7 @@ events.on("eventStart", async eventInfo => {
     let areaInfo = gaa.areaInfo.filter(ai => ai.type == type)
 
     while (!quit) {
-        let comList = undefined
-        if (![, "", 0].includes(pluginOptions.commanderWhiteList)) {
-            const [start, end] = pluginOptions.commanderWhiteList.split("-").map(Number).map(a => a - 1)
-            comList = Array.from({ length: end - start + 1 }, (_, i) => start + i)
-        }
+        const comList = parseCommanderWhiteList(pluginOptions.commanderWhiteList)
 
         const commander = await waitForCommanderAvailable(comList)
         try {
@@ -362,7 +358,7 @@ events.on("eventStart", async eventInfo => {
                 throw err[attackInfo.result]
 
 
-            console.info("hittingTargetAttack", 'C', attackInfo.AAM.UM.L.VIS + 1, ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
+            console.info("hittingTargetAttack", 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
         } catch (e) {
             freeCommander(commander.lordID)
             switch (e) {
