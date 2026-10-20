@@ -80,6 +80,14 @@ userDatabase.exec(
   PRIMARY KEY("id" AUTOINCREMENT)
 )
 `)
+//Starting ruby balance per game account, written by the bots (ggeBot.js)
+userDatabase.exec(
+  `CREATE TABLE IF NOT EXISTS "RubyTracking" (
+  "id" INTEGER PRIMARY KEY,
+  "startRubies" INTEGER NOT NULL,
+  "startTime" INTEGER NOT NULL
+)
+`)
 
 class User {
   constructor(obj) {
@@ -932,6 +940,15 @@ async function start() {
           loggedInUsers[uuid]?.forEach(({ ws }) => 
             ws.send(JSON.stringify([ErrorType.Success, ActionType.GetUsers, [getUser(uuid), plugins.filter(e => !e.hidden)]])))
           broadcastAdmins()
+          break
+        }
+        case ActionType.ResetRubies: {
+          //The owner, or an admin, starts the ruby count again from zero
+          const id = Number(obj?.id)
+          if (!getSpecificUser(uuid, { id }) && !isAdmin(uuid))
+            return ws.send(JSON.stringify([ErrorType.Unauthenticated, ActionType.ResetRubies, {}]))
+          userDatabase.prepare('DELETE FROM RubyTracking WHERE id = ?').run(id)
+          botMap.get(id)?.postMessage([ActionType.ResetRubies])
           break
         }
         case ActionType.AdminGetUsers: {

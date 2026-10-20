@@ -27,6 +27,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import RestartAltIcon from '@mui/icons-material/RestartAlt'
 
 import { ErrorType, ActionType } from "../types.js"
 import UserSettings from './userSettings'
@@ -58,14 +59,34 @@ function AttackChip({ status, __ }) {
     </Tooltip>
 }
 
-function StatusChips({ status, __ }) {
+//Ruby balance change since the saved start (ggeBot.js), e.g. "💎 +1.2K"
+function RubyGainChip({ status, onReset, __ }) {
+    const gain = Number(status.rubyGain)
+    const since = new Date(Number(status.rubyGainSince)).toLocaleString()
+    const sign = gain > 0 ? "+" : ""
+    const reset = () => {
+        if (window.confirm(__("rubyResetConfirm", "Start counting rubies from zero again?")))
+            onReset()
+    }
+    return <Tooltip title={`${__("rubyGainHint", "Ruby change since")} ${since}: ${sign}${fullNumber.format(gain)}. ` +
+        __("rubyGainNote", "Counts every change of the balance, also your own purchases and spending.")}>
+        <Chip size="small" variant="outlined" color={gain > 0 ? "success" : gain < 0 ? "error" : "default"}
+            label={`💎 ${sign}${compactNumber.format(gain)}`}
+            onDelete={onReset ? reset : undefined}
+            deleteIcon={<RestartAltIcon aria-label={__("rubyReset", "Reset ruby count")} />} />
+    </Tooltip>
+}
+
+function StatusChips({ status, onResetRubies, __ }) {
     const shown = STATUS_FIELDS.filter(field => status[field.key] !== undefined && status[field.key] !== null)
     const hasAttacks = Number.isFinite(Number(status.attacks)) && status.attacks !== null
-    if (shown.length === 0 && !hasAttacks)
+    const hasRubyGain = Number.isFinite(Number(status.rubyGain)) && status.rubyGain !== null
+    if (shown.length === 0 && !hasAttacks && !hasRubyGain)
         return <Typography variant="body2" color="text.secondary">-</Typography>
 
     return <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
         {hasAttacks ? <AttackChip status={status} __={__} /> : undefined}
+        {hasRubyGain ? <RubyGainChip status={status} onReset={onResetRubies} __={__} /> : undefined}
         {shown.map(field => {
             const value = Number(status[field.key])
             const label = __(field.langKey ?? field.key, field.label)
@@ -136,7 +157,7 @@ function PlayerRow({ row, status, ws, selected, toggleSelected, onLogs, onSettin
             </Box>
         </TableCell>
         <TableCell sx={{ maxWidth: "25vw" }}><PluginChips row={row} __={__} /></TableCell>
-        <TableCell><StatusChips status={status} __={__} /></TableCell>
+        <TableCell><StatusChips status={status} onResetRubies={() => ws.send(JSON.stringify([ErrorType.Success, ActionType.ResetRubies, { id: row.id }]))} __={__} /></TableCell>
         <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
             <RowActions row={row} ws={ws} state={state} setState={setState} onLogs={onLogs} onSettings={onSettings} __={__} />
         </TableCell>
@@ -155,7 +176,7 @@ function PlayerCard({ row, status, ws, selected, toggleSelected, onLogs, onSetti
                 {status.hasError ? <ErrorBadge __={__} /> : undefined}
             </Box>
             <Typography variant="caption" color="text.secondary">{__("status")}</Typography>
-            <Box sx={{ mb: 1 }}><StatusChips status={status} __={__} /></Box>
+            <Box sx={{ mb: 1 }}><StatusChips status={status} onResetRubies={() => ws.send(JSON.stringify([ErrorType.Success, ActionType.ResetRubies, { id: row.id }]))} __={__} /></Box>
             <Typography variant="caption" color="text.secondary">{__("plugins")}</Typography>
             <PluginChips row={row} __={__} />
         </CardContent>

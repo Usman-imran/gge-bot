@@ -343,6 +343,10 @@ parentPort.on("message", async obj => {
         case ActionType.StatusUser:
             parentPort.postMessage([ActionType.StatusUser, status])
             break
+        case ActionType.ResetRubies:
+            updateRubyGain(true)
+            parentPort.postMessage([ActionType.StatusUser, status])
+            break
         case ActionType.GetExternalEvent:
             sendXT("sei", JSON.stringify({}))
             let [sei, _] = await waitForResult("sei", 1000 * 10)
@@ -477,11 +481,39 @@ xtHandler.on("qli", obj => obj.QL.forEach(quest => {
         sendXT("qsc", JSON.stringify({ QID: quest.QID }))
 }))
 
+//Ruby change since a saved starting balance (survives restarts, reset from
+//the dashboard). It is the balance change, so the player's own purchases
+//and spending count too.
+const rubyDatabase = new DatabaseSync('./user.db', { timeout: 1000 * 60 })
+rubyDatabase.exec(`CREATE TABLE IF NOT EXISTS "RubyTracking" (
+    "id" INTEGER PRIMARY KEY,
+    "startRubies" INTEGER NOT NULL,
+    "startTime" INTEGER NOT NULL
+)`)
+const getRubyStart = rubyDatabase.prepare('SELECT startRubies, startTime FROM RubyTracking WHERE id = ?')
+const setRubyStart = rubyDatabase.prepare('INSERT OR REPLACE INTO RubyTracking (id, startRubies, startTime) VALUES (?, ?, ?)')
+const updateRubyGain = (restart = false) => {
+    const rubies = Math.floor(Number(playerInfo.rubies))
+    if (!Number.isFinite(rubies) || botConfig.id == undefined)
+        return
+    let start = restart ? undefined : getRubyStart.get(botConfig.id)
+    if (!start) {
+        start = { startRubies: rubies, startTime: Date.now() }
+        setRubyStart.run(botConfig.id, start.startRubies, start.startTime)
+    }
+    Object.assign(status, {
+        rubyGain: rubies - start.startRubies,
+        rubyGainSince: start.startTime
+    })
+}
+
 xtHandler.on("gcu", obj => {
     Object.assign(status, {
         coin: obj.C1 != 0 ? Math.floor(playerInfo.coin = obj.C1) : undefined,
         rubies: obj.C2 != 0 ? Math.floor(playerInfo.rubies = obj.C2) : undefined,
     })
+    playerInfo.rubies = Number(obj.C2 ?? playerInfo.rubies)
+    updateRubyGain()
     parentPort.postMessage([ActionType.StatusUser, status])
 })
 

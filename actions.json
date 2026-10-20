@@ -21,5 +21,6 @@
     "KillBot" : 19,
     "AdminGetUsers" : 20,
     "AdminSetState" : 21,
-    "AdminRemoveUsers" : 22
+    "AdminRemoveUsers" : 22,
+    "ResetRubies" : 23
 }
