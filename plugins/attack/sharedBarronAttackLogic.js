@@ -337,7 +337,7 @@ async function barronHit(type, kingdomID, options) {
                 const executionDuration = ((Date.now() - executionStartTime) / 1000).toFixed(2);
                 obj.executionDuration = executionDuration; // Pass it out
 
-                return { ...obj, attackInfo, result, executionDuration, hitFrom: source.sourceArea, hitDistance: best.distance }
+                return { ...obj, attackInfo, result, executionDuration, hitFrom: source.sourceArea }
             })
 
             if (!attackInfo) {
@@ -348,7 +348,7 @@ async function barronHit(type, kingdomID, options) {
                 console.debug(`${JSON.stringify(attackInfo)}`)
                 throw err[attackInfo.result]
             }
-            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack", ` (${fields(attackInfo.hitDistance)} fields from ${attackInfo.hitFrom.x}:${attackInfo.hitFrom.y})`)
+            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack", ` (from ${attackInfo.hitFrom.x}:${attackInfo.hitFrom.y})`)
             return true
         } catch (e) {
             freeCommander(commander.lordID)
@@ -415,7 +415,6 @@ async function barronHit(type, kingdomID, options) {
         }
         return found
     }
-    const fields = distance => Math.round(Math.sqrt(distance))
     //Reads all barons again: new cooldowns (also from other players' hits)
     const loadBarons = async () => {
         for (const sourceArea of sourceCastleAreas)
@@ -435,7 +434,7 @@ async function barronHit(type, kingdomID, options) {
     }
     await loadBarons()
     for (const { sourceArea, sortedAreaInfo: list } of sortedAreaInfo) {
-        const nearest = list[0] ? `, nearest ${list[0].x}:${list[0].y} (${fields(getDistance(sourceArea, list[0]))} fields)` : ""
+        const nearest = list[0] ? `, nearest ${list[0].x}:${list[0].y}` : ""
         console.log(`[${KingdomID[kingdomID]}] ${list.length} barons around castle ${sourceArea.x}:${sourceArea.y}${nearest}`)
     }
     setInterval(() => loadBarons().catch(e => console.debug(e)), 1000 * 60 * 30).unref()
