@@ -26,20 +26,24 @@ const i18n = new I18n({
   updateFiles: false,
 })
 
-const movements = []
+let movements = []
 
-xtHandler.on("gam", func = async obj => {
+xtHandler.on("gam", async obj => {
     await clientReady
-    obj.M.forEach(async movement => {
+    obj.M?.forEach(async movement => {
         if (![0, 25, 31, 24, 29].includes(movement.M.T))
             return
 
         let e = movements.find((e) => e.M.MID == movement.M.MID)
 
-        let attacker = obj.O.find((e) => e.SID == movement.M.SA[4])
-        let victim = obj.O.find((e) => e.TID == movement.M.TA[4])
+        let attacker = obj.O?.find((e) => e.SID == movement.M.SA[4])
+        let victim = obj.O?.find((e) => e.TID == movement.M.TA[4])
 
-        if (attacker.AID == playerInfo.alliance.id)
+        //Owner details missing (e.g. NPC camps): nothing to report
+        if (attacker == undefined || victim == undefined)
+            return
+
+        if (playerInfo.alliance.id != undefined && attacker.AID == playerInfo.alliance.id)
             return
 
         if (e) {
@@ -56,6 +60,13 @@ xtHandler.on("gam", func = async obj => {
         let timespent = movement.M.PT
         let time = timetaken - timespent
 
+        //Remember it right away: the game repeats movements while we are
+        //still waiting for Discord, which would post the same alert twice
+        movements.push(movement)
+        setTimeout(() => {
+            movements = movements.filter(item => item.M.MID !== movement.M.MID)
+        }, time * 1000).unref()
+
         let attackerName = attacker.N
         let attackerAlliance = attacker.AN
         let attackerArea = movement.M.SA[10]
@@ -69,21 +80,22 @@ xtHandler.on("gam", func = async obj => {
 
         let channelAlert
         try {
-            channelAlert = await client.channels.fetch(pluginOptions.channelID)
+            if (pluginOptions.channelID)
+                channelAlert = await client.channels.fetch(pluginOptions.channelID)
         }
         catch (e) {
             console.warn(e)
         }
         let channelAquaAlert
         try {
-            if (pluginOptions.channelAquaAlert)
-                channelAquaAlert = await client.channels.fetch(pluginOptions.stormChannelID)
+            if (pluginOptions.StormChannelID)
+                channelAquaAlert = await client.channels.fetch(pluginOptions.StormChannelID)
         }
         catch (e) {
             console.warn(e)
         }
-        
-        let member = channelAlert.members.find((e) => e.displayName == victimName)
+
+        let member = channelAlert?.members.find((e) => e.displayName == victimName)
         let mention = member?.displayName ? `<@${member.id}> ` : ``
 
         let kidName = [
@@ -117,7 +129,6 @@ xtHandler.on("gam", func = async obj => {
             `<t:${Math.round(Date.now() / 1000 + time)}:R>`
         let data = {}
         data.content = content
-        movements.push(movement)
 
         if (movement.GA != undefined) {
             const file = new AttachmentBuilder(await createLayout(movement.GA))
@@ -125,7 +136,7 @@ xtHandler.on("gam", func = async obj => {
         }
         let message = channel.send(data)
 
-        if (member != undefined) {
+        if (member != undefined && channelAlert != undefined) {
             let shouldAlertMember = () => member?.presence?.status == undefined || (member?.presence?.status !== PresenceUpdateStatus.Online && member?.presence?.status !== PresenceUpdateStatus.DoNotDisturb)
             if (movement.M.KID != 4 && shouldAlertMember()) {
                 let spreadAlert = async () => shouldAlertMember() ? await channelAlert.send(mention) : void 0
@@ -138,9 +149,6 @@ xtHandler.on("gam", func = async obj => {
         if (movement?.GA == undefined)
             movement.message = message
 
-        setTimeout(() => {
-            movements = movements.filter(item => item.M.MID !== movement.M.MID)
-        }, time * 1000)
         await message
     })
 })

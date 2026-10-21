@@ -47,10 +47,14 @@ function Language({ languageCode, setLanguage }) {
     )
 }
 
+//The page's own address (https://rubymining.tech behind nginx). It is sent
+//along as "state" so the server uses exactly the same redirect address,
+//Discord refuses the login when the two differ.
 const openDiscordLink = channelInfo => {
-    const port = settings.port ?? window.location.port
-    const webPort = port !== '' ? port : window.location.protocol === 'https:' ? "443" : "80"
-    window.open(`https://discord.com/oauth2/authorize?client_id=${channelInfo[0]}&permissions=8&response_type=code&redirect_uri=${window.location.protocol === 'https:' ? "https" : "http"}%3A%2F%2F${window.location.hostname}%3A${webPort}%2FdiscordAuth&integration_type=0&scope=identify+guilds.join+bot`, "_blank")
+    const origin = settings.port ?
+        `${window.location.protocol}//${window.location.hostname}:${settings.port}` : window.location.origin
+    const redirect = encodeURIComponent(`${origin}/discordAuth`)
+    window.open(`https://discord.com/oauth2/authorize?client_id=${channelInfo[0]}&permissions=8&response_type=code&redirect_uri=${redirect}&state=${encodeURIComponent(origin)}&integration_type=0&scope=identify+guilds.join+bot`, "_blank")
 }
 
 //Only forgets the login in this browser, the account itself stays as it is

@@ -416,6 +416,21 @@ async function start() {
       client.once(Events.ClientReady, () => {
         resolve()
         app.get('/discordAuth', async (request, response) => {
+          //The dashboard passes its own address as state. Behind nginx this
+          //server only sees http on webPort, which Discord would refuse.
+          let origin = `${request.protocol}://${request.hostname}:${ggeConfig.webPort}`
+          try {
+            const stateUrl = new URL(String(request.query.state))
+            if (['http:', 'https:'].includes(stateUrl.protocol) && stateUrl.hostname == request.hostname)
+              origin = stateUrl.origin
+          }
+          catch { }
+
+          const uuid = request.headers.cookie?.split('; ').find(e => e.startsWith('uuid='))
+            ?.substring(5, Infinity)
+          if (!loginCheck(uuid))
+            return response.send(i18n.__("uuidInvalid"))
+
           const tokenResponseData = await undici.request('https://discord.com/api/oauth2/token', {
             method: 'POST',
             body: new URLSearchParams({
@@ -423,7 +438,7 @@ async function start() {
               client_secret: ggeConfig.discordClientSecret,
               code: request.query.code,
               grant_type: 'authorization_code',
-              redirect_uri: `${request.protocol}://${request.hostname}:${ggeConfig.webPort}/discordAuth`,
+              redirect_uri: `${origin}/discordAuth`,
               scope: 'identify',
             }).toString(),
             headers: {
@@ -445,6 +460,8 @@ async function start() {
             return response.send(i18n.__("missingGuildID"))
 
           let guild = client.guilds.cache.get(guildId)
+          if (!guild)
+            return response.send(i18n.__("missingGuildID"))
           let channelData = guild.channels.cache.map(channel => {
             if (guild.members.me.permissionsIn(channel)
               .has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]))
@@ -452,16 +469,11 @@ async function start() {
 
             return undefined
           }).filter(e => e !== undefined)
-          let uuid = request.headers.cookie.split('; ').find(e => e.startsWith('uuid='))
-            .substring(5, Infinity)
-          let valid = loginCheck(uuid)
-          if (!valid)
-            return response.send(i18n.__("uuidInvalid"))
 
           userDatabase.prepare('UPDATE Users SET discordUserId = ?, discordGuildId = ? WHERE uuid = ?')
               .run(discordIdentifier.id, guildId, uuid)
           
-          loggedInUsers[uuid].forEach(o =>
+          loggedInUsers[uuid]?.forEach(o =>
             o.ws.send(JSON.stringify([ErrorType.Success, ActionType.GetChannels, [ggeConfig.discordClientId, channelData]])))
           return response.send('<html><script language="JavaScript" type="text/javascript">window.close()</script><body>Successful</body></html>')
         })
