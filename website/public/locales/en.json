@@ -228,6 +228,7 @@
 	"recruit": "Auto Recruit",
 	"recruitTroopType": "Troop type",
 	"recruitPackageSize": "Troops per slot",
+	"recruitAllianceHelp": "Ask alliance for help",
 	"ship Upgrades": "Ship (Cargo) upgrades",
 	"auto Upgrade Ships": "Auto upgrade ships",
 	"useTimeSkipsForShips": "Use time skips for ships (never rubies)",

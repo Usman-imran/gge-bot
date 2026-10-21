@@ -18,6 +18,12 @@ if (require('node:worker_threads').isMainThread) {
                 type: "Text",
                 key: "recruitPackageSize",
                 default: "110"
+            },
+            {
+                //Clicks "Alliance help" in the recruit window after recruiting
+                type: "Checkbox",
+                key: "recruitAllianceHelp",
+                default: true
             }
         ]
     }
@@ -75,7 +81,8 @@ const getOptions = () => {
 
     return {
         troop: TROOP_TYPES[troopIndex],
-        packageSize: Math.min(100000, Math.max(1, Number(opts.recruitPackageSize) || 110))
+        packageSize: Math.min(100000, Math.max(1, Number(opts.recruitPackageSize) || 110)),
+        allianceHelp: opts.recruitAllianceHelp ?? true
     }
 }
 
@@ -133,6 +140,61 @@ const sendRecruit = async (castle, unit, amount) => {
 //Every outcome of our command is logged by this plugin
 quietResultKeys.add(RECRUIT_COMMAND)
 
+//The "Alliance help" button of the recruit window sends
+//C2SAllianceHelpRequestVO(listId, AllianceConst.ALLIANCE_HELP_RECRUITMENT_LIST).
+//The type was confirmed from a captured manual request: the server's "ahh"
+//answer carries TID 6 and OP.RLID 0. The server checks the castle we are in.
+const ALLIANCE_HELP_COMMAND = "ahr"
+const ALLIANCE_HELP_RECRUITMENT_LIST = 6
+quietResultKeys.add(ALLIANCE_HELP_COMMAND)
+
+//Not in an alliance: nothing to ask until the next session
+let noAlliance = false
+//Failures already logged, once per castle and reason
+const reportedHelpErrors = new Set()
+
+const requestAllianceHelp = async castle => {
+    if (noAlliance)
+        return
+
+    sendXT(ALLIANCE_HELP_COMMAND, JSON.stringify({
+        ID: UNIT_LIST_ID,
+        T: ALLIANCE_HELP_RECRUITMENT_LIST
+    }))
+
+    let result
+    try {
+        [, result] = await waitForResult(ALLIANCE_HELP_COMMAND, 1000 * 4)
+        result = Number(result)
+    }
+    catch (e) {
+        console.warn(`Alliance help: no answer in ${KingdomID[castle.kingdomID]} area ${castle.areaID}`)
+        return
+    }
+
+    if (result == 0) {
+        console.log(`Alliance help requested in ${KingdomID[castle.kingdomID]} area ${castle.areaID}`)
+        return
+    }
+
+    //Help for this queue is already running, the button is greyed out
+    if (errorIs(result, "NO_MULTIPLE_ALLIANCEHELP"))
+        return
+
+    if (errorIs(result, "PLAYER_HAS_NO_ALLIANCE")) {
+        noAlliance = true
+        console.warn("Alliance help: you are not in an alliance")
+        return
+    }
+
+    const reason = err[result] ?? result
+    const key = `${castle.kingdomID}_${castle.areaID}_${reason}`
+    if (reportedHelpErrors.has(key))
+        return
+    reportedHelpErrors.add(key)
+    console.warn(`Alliance help not possible in ${KingdomID[castle.kingdomID]} area ${castle.areaID}: ${reason}`)
+}
+
 let cycleRunning = false
 const runCycle = async () => {
     if (cycleRunning)
@@ -151,7 +213,7 @@ const runCycle = async () => {
 }
 
 const recruitInAllCastles = async enter => {
-    const { troop, packageSize } = getOptions()
+    const { troop, packageSize, allianceHelp } = getOptions()
 
     const chain = getLevelChain(troop.unitType)
     if (chain.length == 0) {
@@ -205,6 +267,7 @@ const recruitInAllCastles = async enter => {
         }
 
         let recruitedUnit
+        let queueWasFull = false
         let packages = 0
         let recruitedHere = 0
 
@@ -249,7 +312,8 @@ const recruitInAllCastles = async enter => {
             }
 
             //Full queue is the normal case, anything else is worth a look
-            if (!isQueueFullError(result))
+            queueWasFull = isQueueFullError(result)
+            if (!queueWasFull)
                 console.warn("recruitRejected", troop.name, `level ${unit.level}`,
                     err[result] ?? result, "kingdom", castle.kingdomID, "area", castle.areaID)
             break
@@ -287,6 +351,11 @@ const recruitInAllCastles = async enter => {
                 "kingdom", castle.kingdomID, "area", castle.areaID,
                 ...(queueFull ? [] : [`(stopped: ${stopReason ?? "slot limit"})`]))
         }
+
+        //Troops are in the queue: ask the alliance to speed them up while
+        //we are still in this castle
+        if (allianceHelp && (recruitedUnit || queueWasFull))
+            await requestAllianceHelp(castle)
     }
 }
 
