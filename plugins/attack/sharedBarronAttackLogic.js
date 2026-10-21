@@ -8,7 +8,6 @@ const { Types, getResourceCastleList, ClientCommands, AreaType, spendSkip, Kingd
 const { waitToAttack, getAttackInfo, assignUnit, getAmountSoldiersFlank, getAmountSoldiersFront, getMaxUnitsInReinforcementWave } = require("./attack.js")
 const { movementEvents, waitForCommanderAvailable, commanderNumber, parseCommanderWhiteList, freeCommander, useCommander } = require("../commander")
 const { sendXT, waitForResult, xtHandler, botConfig, playerInfo } = require("../../ggeBot.js")
-const getAreaCached = require('../../getMap.js')
 const err = require("../../err.json")
 
 const units = require("../../items/units.json")
@@ -338,7 +337,7 @@ async function barronHit(type, kingdomID, options) {
                 const executionDuration = ((Date.now() - executionStartTime) / 1000).toFixed(2);
                 obj.executionDuration = executionDuration; // Pass it out
 
-                return { ...obj, attackInfo, result, executionDuration }
+                return { ...obj, attackInfo, result, executionDuration, hitFrom: source.sourceArea, hitDistance: best.distance }
             })
 
             if (!attackInfo) {
@@ -349,7 +348,7 @@ async function barronHit(type, kingdomID, options) {
                 console.debug(`${JSON.stringify(attackInfo)}`)
                 throw err[attackInfo.result]
             }
-            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack")
+            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack", ` (${fields(attackInfo.hitDistance)} fields from ${attackInfo.hitFrom.x}:${attackInfo.hitFrom.y})`)
             return true
         } catch (e) {
             freeCommander(commander.lordID)
@@ -388,32 +387,58 @@ async function barronHit(type, kingdomID, options) {
             }
         }
     }
-    for (const sourceArea of sourceCastleAreas) {
-        /** @type {import("../../protocols.js").Types.ServerGetAreaInfo} */
-        let gaa
-        do {
+    //The map around each castle (50 fields each way) is read in four 50x50
+    //pieces, kept inside the map (0-1286). Every piece is checked, so no part
+    //of the area (and none of its barons) can go missing.
+    const MAP_MAX = 1286, RANGE = 50
+    const clamp = v => Math.min(MAP_MAX, Math.max(0, v))
+    const readArea = async (x1, y1, x2, y2) => {
+        for (let attempt = 1; ; attempt++) {
             try {
-                gaa = await getAreaCached(kingdomID,
-                    sourceArea.x - 50, sourceArea.y - 50,
-                    sourceArea.x + 50, sourceArea.y + 50)
-                error = false
+                const gaa = await ClientCommands.getAreaInfo(kingdomID, x1, y1, x2, y2)()
+                if (gaa.result == 0 || attempt >= 5)
+                    return (gaa.areaInfo ?? []).filter(ai => ai.x >= x1 && ai.x <= x2 && ai.y >= y1 && ai.y <= y2)
             } catch (e) {
-                console.warn(e)
-                error = true
+                if (attempt >= 5) {
+                    console.warn(`[${KingdomID[kingdomID]}] Could not read the map at ${x1}:${y1}`, e)
+                    return []
+                }
             }
-        } while (error);
-
-        gaa.areaInfo.filter(ai => ai.type == type)
-            .forEach(ai => uniqueTargets.set(`${ai.x}_${ai.y}`, ai))
+        }
     }
+    const readBaronsAround = async sourceArea => {
+        const found = []
+        for (const [dx, dy] of [[-RANGE, -RANGE], [0, -RANGE], [-RANGE, 0], [0, 0]]) {
+            const x1 = clamp(sourceArea.x + dx), y1 = clamp(sourceArea.y + dy)
+            const x2 = clamp(sourceArea.x + dx + RANGE), y2 = clamp(sourceArea.y + dy + RANGE)
+            found.push(...(await readArea(x1, y1, x2, y2)).filter(ai => ai.type == type))
+        }
+        return found
+    }
+    const fields = distance => Math.round(Math.sqrt(distance))
+    //Reads all barons again: new cooldowns (also from other players' hits)
+    const loadBarons = async () => {
+        for (const sourceArea of sourceCastleAreas)
+            for (const ai of await readBaronsAround(sourceArea)) {
+                const known = uniqueTargets.get(`${ai.x}_${ai.y}`)
+                if (known)
+                    Object.assign(known, ai)
+                else
+                    uniqueTargets.set(`${ai.x}_${ai.y}`, ai)
+            }
 
-    for (const sourceArea of sourceCastleAreas) {
-        sortedAreaInfo.push({
+        sortedAreaInfo = sourceCastleAreas.map(sourceArea => ({
             sourceArea,
             sortedAreaInfo: Array.from(uniqueTargets.values())
                 .sort((a, b) => getDistance(sourceArea, a) - getDistance(sourceArea, b))
-        })
+        }))
     }
+    await loadBarons()
+    for (const { sourceArea, sortedAreaInfo: list } of sortedAreaInfo) {
+        const nearest = list[0] ? `, nearest ${list[0].x}:${list[0].y} (${fields(getDistance(sourceArea, list[0]))} fields)` : ""
+        console.log(`[${KingdomID[kingdomID]}] ${list.length} barons around castle ${sourceArea.x}:${sourceArea.y}${nearest}`)
+    }
+    setInterval(() => loadBarons().catch(e => console.debug(e)), 1000 * 60 * 30).unref()
 
     while (true) {
         if (!options.useTimeSkips) {
