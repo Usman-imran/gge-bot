@@ -36,8 +36,10 @@ xtHandler.on("gam", async obj => {
 
         let e = movements.find((e) => e.M.MID == movement.M.MID)
 
-        let attacker = obj.O?.find((e) => e.SID == movement.M.SA[4])
-        let victim = obj.O?.find((e) => e.TID == movement.M.TA[4])
+        //The movement names both players (SID attacker, TID target), the
+        //owner list O holds their details under OID
+        let attacker = obj.O?.find((e) => e.OID == (movement.M.SID ?? movement.M.SA[4]))
+        let victim = obj.O?.find((e) => e.OID == (movement.M.TID ?? movement.M.TA[4]))
 
         //Owner details missing (e.g. NPC camps): nothing to report
         if (attacker == undefined || victim == undefined)

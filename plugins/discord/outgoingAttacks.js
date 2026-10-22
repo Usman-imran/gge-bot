@@ -40,13 +40,18 @@ xtHandler.addListener("gam", async obj => {
         if (!([0, 1, 2, 3].includes(movement.M.KID)))
             return
 
-        let attacker = obj.O.find(e => e.SID == movement.M.SA[4])
-        let victim = obj.O.find(e => e.TID == movement.M.TA[4])
+        //The movement names both players (SID attacker, TID target), the
+        //owner list O holds their details under OID
+        let attacker = obj.O?.find(e => e.OID == (movement.M.SID ?? movement.M.SA[4]))
+        let victim = obj.O?.find(e => e.OID == (movement.M.TID ?? movement.M.TA[4]))
+        if (attacker == undefined || victim == undefined)
+            return
 
         if (attacker.AID != playerInfo.alliance.id) //if victim is outside of our alliance then ignore it for alerts
             return
 
         let attackerName = attacker.N
+        let attackerAlliance = attacker.AN
         let attackerArea = movement.M.SA[10]
 
         let victimName = victim.N
