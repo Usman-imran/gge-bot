@@ -73,6 +73,10 @@ async function barronHit(type, kingdomID, options) {
     }
     /** All known barons by "x_y", filled once at start below. */
     const uniqueTargets = new Map()
+    //The baron level comes from its victory count (extraData[1]). Remember
+    //it when we hit, so the log shows it before and after the battle.
+    const victories = ai => Number(ai?.extraData?.[1])
+    const victoriesAtHit = new Map()
     //A baron gets a new cooldown when hit (by us or anyone else): read it again
     //from the map, the start-up data would make it look free.
     const refreshTarget = async target => {
@@ -145,6 +149,14 @@ async function barronHit(type, kingdomID, options) {
         //again (and skip the cooldown when allowed)
         refreshTarget(sourceAttack).then(target => {
             freeTarget(sourceAttack)
+            const key = `${sourceAttack.x}_${sourceAttack.y}`
+            if (target && victoriesAtHit.has(key)) {
+                const before = victoriesAtHit.get(key)
+                victoriesAtHit.delete(key)
+                const after = victories(target)
+                console.log(`[${KingdomID[kingdomID]}] Baron ${target.x}:${target.y} victories ${before} -> ${after}` +
+                    (after < before ? " (DROPPED)" : ""))
+            }
             if (target && options.useTimeSkips)
                 skipTarget(target).catch(e => console.debug(e))
         })
@@ -328,6 +340,7 @@ async function barronHit(type, kingdomID, options) {
                     })
                     if (!options.useTimeSkips)
                         markUnderAttack(AI, obj.AAM.M.TT - obj.AAM.M.PT)
+                    victoriesAtHit.set(`${AI.x}_${AI.y}`, victories(AI))
                 }
                 //Someone else hit it since we read the map: get its real cooldown,
                 //so the next pick moves on to the next nearest free baron
@@ -337,7 +350,7 @@ async function barronHit(type, kingdomID, options) {
                 const executionDuration = ((Date.now() - executionStartTime) / 1000).toFixed(2);
                 obj.executionDuration = executionDuration; // Pass it out
 
-                return { ...obj, attackInfo, result, executionDuration, hitFrom: source.sourceArea }
+                return { ...obj, attackInfo, result, executionDuration, hitFrom: source.sourceArea, hitVictories: victories(AI) }
             })
 
             if (!attackInfo) {
@@ -348,7 +361,7 @@ async function barronHit(type, kingdomID, options) {
                 console.debug(`${JSON.stringify(attackInfo)}`)
                 throw err[attackInfo.result]
             }
-            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack", ` (from ${attackInfo.hitFrom.x}:${attackInfo.hitFrom.y})`)
+            console.info("hittingTargetAttack", KingdomID[kingdomID], ' ', 'C', commanderNumber(attackInfo.AAM.UM.L.ID), ' ', attackInfo.AAM.M.TA[1], ':', attackInfo.AAM.M.TA[2], " ", pretty(Math.round(1000000000 * Math.abs(Math.max(0, attackInfo.AAM.M.TT - attackInfo.AAM.M.PT))), 's'), "tillImpactAttack", ` (from ${attackInfo.hitFrom.x}:${attackInfo.hitFrom.y}, victories ${attackInfo.hitVictories})`)
             return true
         } catch (e) {
             freeCommander(commander.lordID)
@@ -420,6 +433,9 @@ async function barronHit(type, kingdomID, options) {
         for (const sourceArea of sourceCastleAreas)
             for (const ai of await readBaronsAround(sourceArea)) {
                 const known = uniqueTargets.get(`${ai.x}_${ai.y}`)
+                //A drop without a hit of ours still on its way
+                if (known && victories(ai) < victories(known) && !victoriesAtHit.has(`${ai.x}_${ai.y}`))
+                    console.log(`[${KingdomID[kingdomID]}] Baron ${ai.x}:${ai.y} victories ${victories(known)} -> ${victories(ai)} (DROPPED, not after our hit)`)
                 if (known)
                     Object.assign(known, ai)
                 else
